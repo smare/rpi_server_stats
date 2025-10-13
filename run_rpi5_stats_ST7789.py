@@ -635,7 +635,7 @@ def create_page(page_num):
     Generates different pages based on page number:
     - Page 0: System information (IP, CPU, RAM, Disk, Temperature)
     - Page 1: Network information (Interface, Sent/Received data)
-    - Page 2: Root processes by memory usage
+    - Page 2: Top processes by memory usage
 
     Each page has a unique color-coded title, consistent navigation instructions,
     and auto-cycle status indicator.
@@ -700,6 +700,33 @@ def create_page(page_num):
         else:
             override_remaining = int(time_remaining)
             draw.text((10, 100), f"Manual: {override_remaining}s", font=font_small, fill=PURPLE)
+
+        # Navigation instructions
+        draw.text((10, 180), "Top: Next ->", font=font, fill=GREEN)
+        draw.text((10, 205), "Bottom: <- Prev", font=font, fill=GREEN)
+
+    else:
+        # Page 2: Top Processes
+        # =====================
+        processes = get_top_processes()
+
+        # Title with bright orange color and slightly smaller font (21pt instead of 22pt)
+        draw.text((10, 8), "-- TOP PROCESSES --", font=font_title_small, fill=BRIGHT_ORANGE)
+
+        # List top processes with memory usage
+        y = 35
+        for i, (name, mem) in enumerate(processes):
+            # Display process on single line without truncation
+            draw.text((10, y), f"{i+1}. {name} {mem:.1f}%", font=font, fill=WHITE)
+            y += 20  # 20px spacing between process entries
+
+        # Auto-cycle status (positioned after processes)
+        if is_auto_cycling:
+            mins, secs = divmod(int(time_remaining), 60)
+            draw.text((10, 155), f"Auto: {mins}:{secs:02d}", font=font_small, fill=PURPLE)
+        else:
+            override_remaining = int(time_remaining)
+            draw.text((10, 155), f"Manual: {override_remaining}s", font=font_small, fill=PURPLE)
 
         # Navigation instructions
         draw.text((10, 180), "Top: Next ->", font=font, fill=GREEN)
@@ -918,31 +945,4 @@ if __name__ == "__main__":
     This block only executes when the script is run as the main program,
     not when imported as a module.
     """
-    main() Next ->", font=font, fill=GREEN)
-        draw.text((10, 205), "Bottom: <- Prev", font=font, fill=GREEN)
-
-    else:
-        # Page 2: Top Processes
-        # =====================
-        processes = get_top_processes()
-
-        # Title with bright orange color and slightly smaller font (21pt instead of 22pt)
-        draw.text((10, 8), "-- TOP PROCESSES --", font=font_title_small, fill=BRIGHT_ORANGE)
-
-        # List top processes with memory usage
-        y = 35
-        for i, (name, mem) in enumerate(processes):
-            # Display process on single line without truncation
-            draw.text((10, y), f"{i+1}. {name} {mem:.1f}%", font=font, fill=WHITE)
-            y += 20  # 20px spacing between process entries
-
-        # Auto-cycle status (positioned after processes)
-        if is_auto_cycling:
-            mins, secs = divmod(int(time_remaining), 60)
-            draw.text((10, 155), f"Auto: {mins}:{secs:02d}", font=font_small, fill=PURPLE)
-        else:
-            override_remaining = int(time_remaining)
-            draw.text((10, 155), f"Manual: {override_remaining}s", font=font_small, fill=PURPLE)
-
-        # Navigation instructions
-        draw.text((10, 180), "Top:
+    main()
