@@ -75,7 +75,7 @@ sudo apt install -y build-essential python3-dev python3-smbus python3-pil python
 # Install Raspberry Pi 5 specific GPIO libraries
 print_status "Installing Raspberry Pi 5 GPIO libraries..."
 # First install the core libgpiod library
-sudo apt install -y libgpiod-dev libgpiod2
+sudo apt install -y libgpiod-dev libgpiod3
 if [ $? -eq 0 ]; then
     print_success "Core GPIO libraries installed"
 
