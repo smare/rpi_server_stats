@@ -82,27 +82,30 @@ A comprehensive real-time system monitoring solution for Raspberry Pi 5 using th
 
 ### Raspberry Pi 5 Compatibility
 - **GPIO Library**: gpiod (modern replacement for RPi.GPIO)
-- **GPIO Chip**: gpiochip4 (RPi 5 specific)
-- **API Version**: Auto-detects gpiod v0.x or v1.x
+- **GPIO Chip**: gpiochip4 (via `/dev/gpiochip4`)
+- **API Versions Supported**:
+  - **libgpiod v2.x** (Debian Trixie / RPi OS based on Debian 13)
+  - **libgpiod v1.x** (Debian Bookworm / RPi OS based on Debian 12)
+- **Auto-Detection**: Script automatically detects and uses correct API
 
 ## 🚀 Quick Setup
 
 ### 1. Install Prerequisites (Raspberry Pi 5)
 ```bash
 # Make the Raspberry Pi 5 setup script executable
-chmod +x prerequisites-run_RPi5_ST7789.sh
+chmod +x prerequisites-run_rpi5_stats_ST7789.sh
 
 # Run the Raspberry Pi 5 installation
-./prerequisites-run_RPi5_ST7789.sh
+./prerequisites-run_rpi5_stats_ST7789.sh
 ```
 
-**For other Raspberry Pi models**, use the legacy installer:
+**For other Raspberry Pi models (≤4)**, use the RPi.GPIO version:
 ```bash
-# Make the legacy script executable
-chmod +x prerequisites_install.sh
+# Make the script executable
+chmod +x prerequisites-run_rpi_stats_ST7789.sh
 
-# Run the legacy installation
-./prerequisites_install.sh
+# Run the installation
+./prerequisites-run_rpi_stats_ST7789.sh
 ```
 
 ### 2. Reboot (if required)
@@ -116,15 +119,15 @@ sudo reboot
 **Raspberry Pi 5 (Recommended Method):**
 ```bash
 # Direct execution (if system packages work)
-python3 run_RPi5_ST7789.py
+python3 run_rpi5_stats_ST7789.py
 
 # Or with virtual environment (if gpiod was installed via pip)
-~/pitft_venv/bin/python run_RPi5_ST7789.py
+~/pitft_venv/bin/python run_rpi5_stats_ST7789.py
 ```
 
-**Other Raspberry Pi Models:**
+**Other Raspberry Pi Models (≤4):**
 ```bash
-python3 run_RPi_ST7789.py
+python3 run_rpi_stats_ST7789.py
 ```
 
 ### 4. Configure Automatic Startup (Optional)
@@ -159,17 +162,17 @@ This script will:
 sudo nano /etc/systemd/system/pitft-monitor.service
 ```
 
-2. **Add service configuration**:
+2. **Add service configuration** (adjust paths and username as needed):
 ```ini
 [Unit]
-Description=Mini PiTFT System Monitor with Auto-Cycling
+Description=Mini PiTFT System Monitor with Auto-Cycling (RPi 5)
 After=multi-user.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/pitft-monitor
-ExecStart=/usr/bin/python3 /home/pi/pitft-monitor/run_RPi5_ST7789.py
+User=smare
+WorkingDirectory=/home/smare/dev/projects/rpi_server_stats
+ExecStart=/usr/bin/python3 /home/smare/dev/projects/rpi_server_stats/run_rpi5_stats_ST7789.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -193,11 +196,11 @@ sudo systemctl start pitft-monitor.service
 sudo nano /etc/rc.local
 ```
 
-2. **Add before `exit 0`**:
+2. **Add before `exit 0`** (adjust paths and username as needed):
 ```bash
-# Start Mini PiTFT System Monitor with Auto-Cycling
-cd /home/pi/pitft-monitor
-python3 run_RPi5_ST7789.py &
+# Start Mini PiTFT System Monitor with Auto-Cycling (RPi 5)
+cd /home/smare/dev/projects/rpi_server_stats
+python3 run_rpi5_stats_ST7789.py &
 ```
 
 ### Method 4: Crontab (Alternative)
@@ -207,9 +210,9 @@ python3 run_RPi5_ST7789.py &
 crontab -e
 ```
 
-2. **Add startup entry**:
+2. **Add startup entry** (adjust path as needed):
 ```bash
-@reboot cd /home/pi/pitft-monitor && python3 run_RPi5_ST7789.py
+@reboot cd /home/smare/dev/projects/rpi_server_stats && python3 run_rpi5_stats_ST7789.py
 ```
 
 ## 🔧 Service Management
@@ -267,13 +270,14 @@ The project includes two installation scripts for different Raspberry Pi models:
 
 #### Raspberry Pi 5 (Modern gpiod Method)
 ```bash
-chmod +x prerequisites-run_RPi5_ST7789.sh
-./prerequisites-run_RPi5_ST7789.sh
+chmod +x prerequisites-run_rpi5_stats_ST7789.sh
+./prerequisites-run_rpi5_stats_ST7789.sh
 ```
 
 **Features of the RPi 5 installer:**
 - **Automatic RPi 5 detection** - Verifies BCM2712 chip and Pi 5 compatibility
-- **Modern GPIO libraries** - Installs libgpiod and python3-gpiod for RPi 5
+- **Debian version detection** - Auto-detects Trixie (libgpiod3) vs Bookworm (libgpiod2)
+- **Modern GPIO libraries** - Installs libgpiod and python3-libgpiod for RPi 5
 - **Intelligent package management** - Uses apt packages when available, pip fallback
 - **Virtual environment setup** - Creates backup environment for package isolation
 - **Hardware interface configuration** - Enables SPI/I2C with proper config.txt paths
@@ -281,10 +285,10 @@ chmod +x prerequisites-run_RPi5_ST7789.sh
 - **Comprehensive verification** - Tests all imports and GPIO chip access
 - **Reboot management** - Handles automatic reboot when interfaces are enabled
 
-#### Legacy Raspberry Pi Models (RPi.GPIO Method)
+#### Legacy Raspberry Pi Models (≤4) (RPi.GPIO Method)
 ```bash
-chmod +x prerequisites_install.sh
-./prerequisites_install.sh
+chmod +x prerequisites-run_rpi_stats_ST7789.sh
+./prerequisites-run_rpi_stats_ST7789.sh
 ```
 
 ### Manual System Package Installation
@@ -564,7 +568,7 @@ deactivate
 Mini PiTFT System Monitor - Raspberry Pi 5 Compatible with Auto-Cycling
 =======================================================================
 Initializing display for Raspberry Pi 5...
-Using gpiod v1.x API
+Using gpiod v2.x API (Debian Trixie)
 GPIO initialized for Raspberry Pi 5
 SPI initialized at 8000000 Hz
 Clearing display memory...
@@ -612,8 +616,8 @@ Top button pressed! Switched to page 1 (manual override)
 
 ### GPIO Implementation (Raspberry Pi 5)
 - **Library**: gpiod (modern GPIO interface)
-- **Chip**: gpiochip4 (RPi 5 specific)
-- **API Detection**: Auto-detects v0.x or v1.x gpiod
+- **Chip**: gpiochip4 (via `/dev/gpiochip4`)
+- **API Detection**: Auto-detects libgpiod v2.x (Trixie) or v1.x (Bookworm)
 - **Button Logic**: Active low with internal pull-up
 - **Debouncing**: Edge detection with state tracking
 
@@ -631,28 +635,33 @@ Top button pressed! Switched to page 1 (manual override)
 #### Raspberry Pi 5 Specific Issues
 ```bash
 # Check gpiod installation
-python3 -c "import gpiod; print('gpiod version:', gpiod.__version__)"
+python3 -c "import gpiod; print('gpiod available')"
 
 # Verify GPIO chip
 ls /dev/gpiochip*
 
 # Check gpiod API version
-python3 -c "
+python3 -c '
 import gpiod
-chip = gpiod.Chip('gpiochip4')
-line = chip.get_line(25)
+
+# Try v2 API first (Debian Trixie)
 try:
-    line.request(consumer='test', type=gpiod.LINE_REQ_DIR_OUT)
-    print('gpiod v1.x API detected')
-except:
+    from gpiod.line import Direction, Value, Bias
+    chip = gpiod.Chip("/dev/gpiochip4")
+    print("gpiod v2.x API detected (Debian Trixie)")
+    chip.close()
+except (ImportError, AttributeError):
+    # Try v1 API (Debian Bookworm)
     try:
-        line.request(consumer='test', direction=gpiod.LINE_REQ_DIR_OUT)
-        print('gpiod v0.x API detected')
+        chip = gpiod.Chip("gpiochip4")
+        line = chip.get_line(25)
+        line.request(consumer="test", type=gpiod.LINE_REQ_DIR_OUT)
+        print("gpiod v1.x API detected (Debian Bookworm)")
+        line.release()
+        chip.close()
     except Exception as e:
-        print('gpiod API error:', e)
-line.release()
-chip.close()
-"
+        print(f"gpiod API error: {e}")
+'
 ```
 
 #### Display Not Working
@@ -722,12 +731,13 @@ except:
 
 | Error | Solution |
 |-------|----------|
-| `No module named 'gpiod'` | Run `pip3 install --user gpiod` or `sudo apt install python3-gpiod` |
+| `No module named 'gpiod'` | Run `sudo apt install python3-libgpiod` |
 | `No module named 'spidev'` | Run `pip3 install --user spidev` |
 | `SPI device not found` | Enable SPI: `sudo raspi-config` → Interface Options → SPI |
 | `Permission denied /dev/spidev0.0` | Add user to spi group: `sudo usermod -a -G spi $USER` |
-| `Could not determine gpiod API version` | Install proper gpiod: `sudo apt install python3-gpiod` |
+| `Could not determine gpiod API version` | Install proper gpiod: `sudo apt install python3-libgpiod` |
 | `GPIO chip not found` | Check RPi 5 GPIO chip: `ls /dev/gpiochip*` (should show gpiochip4) |
+| `No such file or directory: gpiochip4` | Use full path `/dev/gpiochip4` (v2 API) or check symlink exists |
 | `Ubuntu Nerd Font not found` | Install manually or system will use fallback fonts |
 | `Auto-cycle not working` | Check console for timing messages and button override indicators |
 
@@ -806,9 +816,9 @@ Feel free to submit issues, feature requests, or improvements!
 ### Development Setup
 ```bash
 git clone <repository>
-cd mini-pitft-monitor
-chmod +x prerequisites-run_RPi5_ST7789.sh
-./prerequisites-run_RPi5_ST7789.sh
+cd rpi_server_stats
+chmod +x prerequisites-run_rpi5_stats_ST7789.sh
+./prerequisites-run_rpi5_stats_ST7789.sh
 ```
 
 ### Feature Requests

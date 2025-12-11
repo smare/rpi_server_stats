@@ -76,10 +76,12 @@ BRIGHT_ORANGE = (255, 165, 0)   # Top Processes page title
 # =====================
 spi = None                      # SPI device handle
 gpio_chip = None               # GPIO chip handle for RPi 5
-dc_line = None                 # DC pin line
-rst_line = None                # Reset pin line
-btn_a_line = None              # Button A line
-btn_b_line = None              # Button B line
+gpio_request = None            # GPIO line request (v2 API)
+dc_line = None                 # DC pin line (v1 API)
+rst_line = None                # Reset pin line (v1 API)
+btn_a_line = None              # Button A line (v1 API)
+btn_b_line = None              # Button B line (v1 API)
+gpiod_version = 1              # Track which gpiod API version we're using
 running = True                 # Main loop control flag
 current_page = 0              # Current displayed page (0=System, 1=Network, 2=Processes)
 last_button_a_state = False   # Previous state of button A (for debouncing)
@@ -95,20 +97,26 @@ def cleanup():
     This function is called when the program exits to ensure proper
     cleanup of hardware resources and prevent GPIO conflicts.
     """
-    global running, spi, gpio_chip, dc_line, rst_line, btn_a_line, btn_b_line
+    global running, spi, gpio_chip, gpio_request, dc_line, rst_line, btn_a_line, btn_b_line, gpiod_version
     running = False
     try:
         if spi:
             spi.close()
         # Release GPIO lines properly for RPi 5
-        if dc_line:
-            dc_line.release()
-        if rst_line:
-            rst_line.release()
-        if btn_a_line:
-            btn_a_line.release()
-        if btn_b_line:
-            btn_b_line.release()
+        if gpiod_version == 2:
+            # v2 API - just release the request
+            if gpio_request:
+                gpio_request.release()
+        else:
+            # v1 API - release individual lines
+            if dc_line:
+                dc_line.release()
+            if rst_line:
+                rst_line.release()
+            if btn_a_line:
+                btn_a_line.release()
+            if btn_b_line:
+                btn_b_line.release()
         if gpio_chip:
             gpio_chip.close()
     except:
@@ -126,6 +134,34 @@ def signal_handler(sig, frame):
     cleanup()
     sys.exit(0)
 
+def set_dc_pin(value):
+    """
+    Set DC pin value using appropriate gpiod API.
+    
+    Args:
+        value (int): 0 for low, 1 for high
+    """
+    global gpiod_version, gpio_request, dc_line
+    if gpiod_version == 2:
+        from gpiod.line import Value
+        gpio_request.set_value(DC_PIN, Value.ACTIVE if value else Value.INACTIVE)
+    else:
+        dc_line.set_value(value)
+
+def set_rst_pin(value):
+    """
+    Set RST pin value using appropriate gpiod API.
+    
+    Args:
+        value (int): 0 for low, 1 for high
+    """
+    global gpiod_version, gpio_request, rst_line
+    if gpiod_version == 2:
+        from gpiod.line import Value
+        gpio_request.set_value(RST_PIN, Value.ACTIVE if value else Value.INACTIVE)
+    else:
+        rst_line.set_value(value)
+
 def write_cmd(cmd):
     """
     Send a command byte to the display via SPI.
@@ -135,7 +171,7 @@ def write_cmd(cmd):
     """
     if not running:
         return
-    dc_line.set_value(0)  # Set DC low for command mode
+    set_dc_pin(0)  # Set DC low for command mode
     spi.xfer2([cmd])
 
 def write_data(data):
@@ -147,7 +183,7 @@ def write_data(data):
     """
     if not running:
         return
-    dc_line.set_value(1)  # Set DC high for data mode
+    set_dc_pin(1)  # Set DC high for data mode
     if isinstance(data, list):
         spi.xfer2(data)
     else:
@@ -205,7 +241,7 @@ def init_display():
     Initialize the ST7789 display with proper configuration for Raspberry Pi 5.
 
     This function handles:
-    - GPIO setup using gpiod for RPi 5 compatibility
+    - GPIO setup using gpiod for RPi 5 compatibility (supports both v1.x and v2.x API)
     - SPI initialization
     - ST7789 chip initialization sequence
     - 180° rotation configuration
@@ -214,71 +250,104 @@ def init_display():
     Returns:
         bool: True if initialization successful, False otherwise
     """
-    global spi, gpio_chip, dc_line, rst_line, btn_a_line, btn_b_line
+    global spi, gpio_chip, gpio_request, dc_line, rst_line, btn_a_line, btn_b_line, gpiod_version
 
     print("Initializing display for Raspberry Pi 5...")
 
     # Initialize GPIO using gpiod for Raspberry Pi 5
     try:
-        # First try to detect gpiod version and use appropriate API
-        gpio_chip = gpiod.Chip('gpiochip4')  # RPi 5 uses gpiochip4 for main GPIO
-
-        # Test which API version we have
-        test_line = gpio_chip.get_line(DC_PIN)
-
-        # Try newer API first
+        # Try v2 API first (libgpiod 2.x - Debian Trixie)
         try:
-            test_line.request(consumer="test", type=gpiod.LINE_REQ_DIR_OUT)
-            test_line.release()
-            print("Using gpiod v1.x API")
-            use_v1_api = True
-        except:
-            # Try older API
+            from gpiod.line import Direction, Value, Bias
+            
+            # v2 API requires full path
+            gpio_chip = gpiod.Chip("/dev/gpiochip4")
+            
+            # Request all lines at once with v2 API
+            gpio_request = gpio_chip.request_lines(
+                consumer="pitft_monitor",
+                config={
+                    DC_PIN: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+                    RST_PIN: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.INACTIVE),
+                    BTN_A_PIN: gpiod.LineSettings(direction=Direction.INPUT, bias=Bias.PULL_UP),
+                    BTN_B_PIN: gpiod.LineSettings(direction=Direction.INPUT, bias=Bias.PULL_UP),
+                }
+            )
+            
+            gpiod_version = 2
+            print("Using gpiod v2.x API (Debian Trixie)")
+            print("GPIO initialized for Raspberry Pi 5")
+            
+        except (ImportError, AttributeError, TypeError) as e:
+            # Fall back to v1.x API (libgpiod 1.x - Debian Bookworm)
+            print(f"v2 API not available ({e}), trying v1.x API...")
+            
+            # Close chip if it was opened
+            if gpio_chip:
+                try:
+                    gpio_chip.close()
+                except:
+                    pass
+            
+            gpio_chip = gpiod.Chip('gpiochip4')  # v1 API uses name without path
+
+            # Test which v1.x API variant we have
+            test_line = gpio_chip.get_line(DC_PIN)
+
+            # Try type= parameter first (most common v1.x)
             try:
-                test_line.request(consumer="test", direction=gpiod.LINE_REQ_DIR_OUT)
+                test_line.request(consumer="test", type=gpiod.LINE_REQ_DIR_OUT)
                 test_line.release()
-                print("Using gpiod v0.x API")
-                use_v1_api = False
-            except Exception as e:
-                print(f"Could not determine gpiod API version: {e}")
-                return False
+                print("Using gpiod v1.x API (type parameter)")
+                use_type_param = True
+            except:
+                # Try direction= parameter
+                try:
+                    test_line.request(consumer="test", direction=gpiod.LINE_REQ_DIR_OUT)
+                    test_line.release()
+                    print("Using gpiod v1.x API (direction parameter)")
+                    use_type_param = False
+                except Exception as e2:
+                    print(f"Could not determine gpiod v1 API variant: {e2}")
+                    return False
 
-        # Configure pins based on API version
-        if use_v1_api:
-            # v1.x API
-            dc_line = gpio_chip.get_line(DC_PIN)
-            dc_line.request(consumer="pitft_dc", type=gpiod.LINE_REQ_DIR_OUT)
+            # Configure pins based on v1.x API variant
+            if use_type_param:
+                dc_line = gpio_chip.get_line(DC_PIN)
+                dc_line.request(consumer="pitft_dc", type=gpiod.LINE_REQ_DIR_OUT)
 
-            rst_line = gpio_chip.get_line(RST_PIN)
-            rst_line.request(consumer="pitft_rst", type=gpiod.LINE_REQ_DIR_OUT)
+                rst_line = gpio_chip.get_line(RST_PIN)
+                rst_line.request(consumer="pitft_rst", type=gpiod.LINE_REQ_DIR_OUT)
 
-            btn_a_line = gpio_chip.get_line(BTN_A_PIN)
-            btn_a_line.request(consumer="pitft_btn_a", type=gpiod.LINE_REQ_DIR_IN,
-                              flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
+                btn_a_line = gpio_chip.get_line(BTN_A_PIN)
+                btn_a_line.request(consumer="pitft_btn_a", type=gpiod.LINE_REQ_DIR_IN,
+                                  flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
 
-            btn_b_line = gpio_chip.get_line(BTN_B_PIN)
-            btn_b_line.request(consumer="pitft_btn_b", type=gpiod.LINE_REQ_DIR_IN,
-                              flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
-        else:
-            # v0.x API
-            dc_line = gpio_chip.get_line(DC_PIN)
-            dc_line.request(consumer="pitft_dc", direction=gpiod.LINE_REQ_DIR_OUT)
+                btn_b_line = gpio_chip.get_line(BTN_B_PIN)
+                btn_b_line.request(consumer="pitft_btn_b", type=gpiod.LINE_REQ_DIR_IN,
+                                  flags=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
+            else:
+                dc_line = gpio_chip.get_line(DC_PIN)
+                dc_line.request(consumer="pitft_dc", direction=gpiod.LINE_REQ_DIR_OUT)
 
-            rst_line = gpio_chip.get_line(RST_PIN)
-            rst_line.request(consumer="pitft_rst", direction=gpiod.LINE_REQ_DIR_OUT)
+                rst_line = gpio_chip.get_line(RST_PIN)
+                rst_line.request(consumer="pitft_rst", direction=gpiod.LINE_REQ_DIR_OUT)
 
-            btn_a_line = gpio_chip.get_line(BTN_A_PIN)
-            btn_a_line.request(consumer="pitft_btn_a", direction=gpiod.LINE_REQ_DIR_IN,
-                              bias=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
+                btn_a_line = gpio_chip.get_line(BTN_A_PIN)
+                btn_a_line.request(consumer="pitft_btn_a", direction=gpiod.LINE_REQ_DIR_IN,
+                                  bias=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
 
-            btn_b_line = gpio_chip.get_line(BTN_B_PIN)
-            btn_b_line.request(consumer="pitft_btn_b", direction=gpiod.LINE_REQ_DIR_IN,
-                              bias=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
+                btn_b_line = gpio_chip.get_line(BTN_B_PIN)
+                btn_b_line.request(consumer="pitft_btn_b", direction=gpiod.LINE_REQ_DIR_IN,
+                                  bias=gpiod.LINE_REQ_FLAG_BIAS_PULL_UP)
 
-        print("GPIO initialized for Raspberry Pi 5")
+            gpiod_version = 1
+            print("GPIO initialized for Raspberry Pi 5")
 
     except Exception as e:
         print(f"GPIO initialization failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
     # Initialize SPI communication
@@ -293,9 +362,9 @@ def init_display():
         return False
 
     # Hardware reset sequence
-    rst_line.set_value(0)  # Reset low
+    set_rst_pin(0)  # Reset low
     time.sleep(0.1)
-    rst_line.set_value(1)    # Reset high
+    set_rst_pin(1)  # Reset high
     time.sleep(0.12)
 
     try:
@@ -768,6 +837,25 @@ def check_auto_cycle():
 
     return False
 
+def get_button_states():
+    """
+    Read button states using appropriate gpiod API.
+    
+    Returns:
+        tuple: (btn_a_pressed, btn_b_pressed) - True if pressed (active low)
+    """
+    global gpiod_version, gpio_request, btn_a_line, btn_b_line
+    
+    if gpiod_version == 2:
+        from gpiod.line import Value
+        btn_a_val = gpio_request.get_value(BTN_A_PIN)
+        btn_b_val = gpio_request.get_value(BTN_B_PIN)
+        # Active low - INACTIVE means pressed (button pulls to ground)
+        return (btn_a_val == Value.INACTIVE, btn_b_val == Value.INACTIVE)
+    else:
+        # v1 API - 0 means pressed (active low)
+        return (btn_a_line.get_value() == 0, btn_b_line.get_value() == 0)
+
 def check_buttons():
     """
     Check button states and handle page navigation using gpiod for RPi 5.
@@ -791,9 +879,8 @@ def check_buttons():
         return False
 
     try:
-        # Read current button states using gpiod (active low - pressed = 0)
-        btn_a_pressed = btn_a_line.get_value() == 0  # Bottom button
-        btn_b_pressed = btn_b_line.get_value() == 0  # Top button
+        # Read current button states (active low - pressed = True)
+        btn_a_pressed, btn_b_pressed = get_button_states()
 
         page_changed = False
         current_time = time.time()

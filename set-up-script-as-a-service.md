@@ -1,55 +1,211 @@
-Project home directory: `/home/smare/dev/projects/server-stats-7789-display`
+# Setting Up the System Monitor as a Systemd Service
 
-Script name: `setup_install_claude_RPi5_ST7789.py`
+This guide walks through setting up either the RPi 5 (`run_rpi5_stats_ST7789.py`) or RPi ≤4 (`run_rpi_stats_ST7789.py`) script as a systemd service that starts automatically on boot.
 
-Runtime executible: `/usr/bin/python`
+## Prerequisites
 
-`*.service` files go here: `/etc/systemd/system/`
+- Script tested and working manually
+- Project directory: `/home/smare/dev/projects/rpi_server_stats`
+- Service files location: `/etc/systemd/system/`
 
-**_______________BEGIN_______________**
-1) Start in directory `/home/smare/dev/projects/server-stats-7789-display`
-2) ** Switch to root: `sudo -s` **
-3) Perform the following commands
-4) Install `/etc/systemd/system/setup_install_claude_RPi5_ST7789` service script
-4a) `cd /etc/systemd/system/`
-4b) `vi setup_install_claude_RPi5_ST7789.py`
-4c) Copy and paste the following configurations one by one:
-	a) `systemctl stop setup_install_claude_RPi5_ST7789.service`
-	b) `systemctl disable setup_install_claude_RPi5_ST7789.service`
-	c) `rm /etc/systemd/system/setup_install_claude_RPi5_ST7789.service`
-	d) `systemctl daemon-reload`
-	e) `systemctl reset-failed`
+## Choose Your Version
 
-5) Create the service file: `vi setup_install_claude_RPi5_ST7789.service`
-5a) Paste the following into vi (don't forget to enter `i` to switch to `INSERT` mode!)
+| Raspberry Pi Model | Script | Service Name |
+|-------------------|--------|--------------|
+| RPi 5 | `run_rpi5_stats_ST7789.py` | `pitft-rpi5-monitor.service` |
+| RPi ≤4 (Zero, 3, 4) | `run_rpi_stats_ST7789.py` | `pitft-rpi-monitor.service` |
+
+---
+
+## Option A: Raspberry Pi 5 Setup
+
+### Step 1: Remove Any Existing Service (if needed)
+
+```bash
+sudo systemctl stop pitft-rpi5-monitor.service 2>/dev/null
+sudo systemctl disable pitft-rpi5-monitor.service 2>/dev/null
+sudo rm -f /etc/systemd/system/pitft-rpi5-monitor.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed
 ```
-Description=Displays server statistics on ST7789 displays.
-After=network.target
+
+### Step 2: Create the Service File
+
+```bash
+sudo nano /etc/systemd/system/pitft-rpi5-monitor.service
+```
+
+Paste the following content:
+
+```ini
+[Unit]
+Description=Mini PiTFT System Monitor (RPi 5 - gpiod)
+After=multi-user.target
 
 [Service]
-ExecStart=/usr/bin/python /home/smare/dev/projects/server-stats-7789-display/setup_install_claude_RPi5_ST7789.py
-WorkingDirectory=/home/smare/dev/projects/server-stats-7789-display
-StandardOutput=inherit
-StandardError=inherit
-Restart=always
+Type=simple
 User=smare
+WorkingDirectory=/home/smare/dev/projects/rpi_server_stats
+ExecStart=/usr/bin/python3 /home/smare/dev/projects/rpi_server_stats/run_rpi5_stats_ST7789.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 ```
-5b) Save file `:wq` then `cd /home/smare/dev/projects/server-stats-7789-display`
 
-6) root@rpi5sysmon:/home/smare/dev/projects/server-stats-7789-display# `systemctl enable /etc/systemd/system/setup_install_claude_RPi5_ST7789.service`
-`Created symlink /etc/systemd/system/multi-user.target.wants/setup_install_claude_RPi5_ST7789.service → /etc/systemd/system/setup_install_claude_RPi5_ST7789.service.`
+Save and exit (`Ctrl+X`, then `Y`, then `Enter`).
 
-7) `chmod +x /etc/systemd/system/setup_install_claude_RPi5_ST7789.py`
+### Step 3: Enable and Start the Service
 
-8) `systemctl enable setup_install_claude_RPi5_ST7789.service`
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable pitft-rpi5-monitor.service
+sudo systemctl start pitft-rpi5-monitor.service
+```
 
-9) `systemctl start setup_install_claude_RPi5_ST7789.service`
+### Step 4: Verify Status
 
-10) `systemctl status setup_install_claude_RPi5_ST7789.service`
+```bash
+sudo systemctl status pitft-rpi5-monitor.service
+```
 
-11) `exit` root profile
+---
 
-12) `sudo shutdown -r now`
+## Option B: Raspberry Pi ≤4 Setup (Zero, 3, 4)
+
+### Step 1: Remove Any Existing Service (if needed)
+
+```bash
+sudo systemctl stop pitft-rpi-monitor.service 2>/dev/null
+sudo systemctl disable pitft-rpi-monitor.service 2>/dev/null
+sudo rm -f /etc/systemd/system/pitft-rpi-monitor.service
+sudo systemctl daemon-reload
+sudo systemctl reset-failed
+```
+
+### Step 2: Create the Service File
+
+```bash
+sudo nano /etc/systemd/system/pitft-rpi-monitor.service
+```
+
+Paste the following content:
+
+```ini
+[Unit]
+Description=Mini PiTFT System Monitor (RPi.GPIO)
+After=multi-user.target
+
+[Service]
+Type=simple
+User=smare
+WorkingDirectory=/home/smare/dev/projects/rpi_server_stats
+ExecStart=/usr/bin/python3 /home/smare/dev/projects/rpi_server_stats/run_rpi_stats_ST7789.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Save and exit (`Ctrl+X`, then `Y`, then `Enter`).
+
+### Step 3: Enable and Start the Service
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable pitft-rpi-monitor.service
+sudo systemctl start pitft-rpi-monitor.service
+```
+
+### Step 4: Verify Status
+
+```bash
+sudo systemctl status pitft-rpi-monitor.service
+```
+
+---
+
+## Service Management Commands
+
+Replace `SERVICE_NAME` with either `pitft-rpi5-monitor` or `pitft-rpi-monitor`:
+
+| Action | Command |
+|--------|---------|
+| Check status | `sudo systemctl status SERVICE_NAME.service` |
+| Start service | `sudo systemctl start SERVICE_NAME.service` |
+| Stop service | `sudo systemctl stop SERVICE_NAME.service` |
+| Restart service | `sudo systemctl restart SERVICE_NAME.service` |
+| View logs | `sudo journalctl -u SERVICE_NAME.service -f` |
+| View recent logs | `sudo journalctl -u SERVICE_NAME.service --since "10 minutes ago"` |
+| Disable auto-start | `sudo systemctl disable SERVICE_NAME.service` |
+| Enable auto-start | `sudo systemctl enable SERVICE_NAME.service` |
+
+---
+
+## Troubleshooting
+
+### Service Won't Start
+
+1. **Check logs:**
+   ```bash
+   sudo journalctl -u pitft-rpi5-monitor.service -n 50
+   ```
+
+2. **Test script manually:**
+   ```bash
+   cd /home/smare/dev/projects/rpi_server_stats
+   python3 run_rpi5_stats_ST7789.py
+   ```
+
+3. **Check file permissions:**
+   ```bash
+   ls -la /home/smare/dev/projects/rpi_server_stats/run_rpi5_stats_ST7789.py
+   chmod +x /home/smare/dev/projects/rpi_server_stats/run_rpi5_stats_ST7789.py
+   ```
+
+4. **Verify Python path:**
+   ```bash
+   which python3
+   ```
+
+### GPIO Permission Issues (RPi 5)
+
+If gpiod can't access GPIO:
+
+```bash
+sudo usermod -a -G gpio smare
+# Then logout and login, or reboot
+```
+
+### Service Status Meanings
+
+| Status | Meaning |
+|--------|---------|
+| `Active (running)` | Working correctly |
+| `Failed` | Error occurred - check logs |
+| `Inactive (dead)` | Service stopped |
+| `Activating` | Service starting up |
+
+---
+
+## Reboot and Verify
+
+After setup, reboot to confirm the service starts automatically:
+
+```bash
+sudo reboot
+```
+
+After reboot, check service status:
+
+```bash
+sudo systemctl status pitft-rpi5-monitor.service
+```
+
+The display should show system stats within ~10 seconds of boot completing.

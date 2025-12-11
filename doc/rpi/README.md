@@ -82,9 +82,10 @@ A comprehensive real-time system monitoring solution for Raspberry Pi using the 
 - **Mode**: 0
 
 ### Raspberry Pi Compatibility
-- **GPIO Library**: RPi.GPIO (universal compatibility)
-- **Models Supported**: All Raspberry Pi models (Zero, 3, 4, 5)
+- **GPIO Library**: RPi.GPIO (legacy GPIO interface)
+- **Models Supported**: Raspberry Pi Zero, Zero 2 W, 3, 4 (all models ≤4)
 - **OS Support**: Raspberry Pi OS (Bullseye, Bookworm)
+- **Note**: For Raspberry Pi 5, use `run_rpi5_stats_ST7789.py` with gpiod instead
 
 ## 🚀 Quick Setup
 
@@ -97,11 +98,11 @@ chmod +x prerequisites-run_rpi_stats_ST7789.sh
 ./prerequisites-run_rpi_stats_ST7789.sh
 ```
 
-**For Raspberry Pi 5**, consider using the gpiod version:
+**For Raspberry Pi 5**, use the gpiod version instead:
 ```bash
-# RPi 5 optimized installer (alternative)
-chmod +x prerequisites-setup_install_claude_RPi5_ST7789.sh
-./prerequisites-setup_install_claude_RPi5_ST7789.sh
+# RPi 5 requires gpiod - see doc/rpi5/README.md
+chmod +x prerequisites-run_rpi5_stats_ST7789.sh
+./prerequisites-run_rpi5_stats_ST7789.sh
 ```
 
 ### 2. Reboot (if required)
@@ -159,7 +160,7 @@ This script will:
 sudo nano /etc/systemd/system/pitft-monitor.service
 ```
 
-2. **Add service configuration**:
+2. **Add service configuration** (adjust paths and username as needed):
 ```ini
 [Unit]
 Description=Mini PiTFT Auto-Cycling System Monitor (RPi.GPIO)
@@ -167,9 +168,9 @@ After=multi-user.target
 
 [Service]
 Type=simple
-User=pi
-WorkingDirectory=/home/pi/pitft-monitor
-ExecStart=/usr/bin/python3 /home/pi/pitft-monitor/run_rpi_stats_ST7789.py
+User=smare
+WorkingDirectory=/home/smare/dev/projects/rpi_server_stats
+ExecStart=/usr/bin/python3 /home/smare/dev/projects/rpi_server_stats/run_rpi_stats_ST7789.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -193,10 +194,10 @@ sudo systemctl start pitft-monitor.service
 sudo nano /etc/rc.local
 ```
 
-2. **Add before `exit 0`**:
+2. **Add before `exit 0`** (adjust paths as needed):
 ```bash
-# Start Mini PiTFT Auto-Cycling System Monitor
-cd /home/pi/pitft-monitor
+# Start Mini PiTFT Auto-Cycling System Monitor (RPi ≤4)
+cd /home/smare/dev/projects/rpi_server_stats
 python3 run_rpi_stats_ST7789.py &
 ```
 
@@ -207,9 +208,9 @@ python3 run_rpi_stats_ST7789.py &
 crontab -e
 ```
 
-2. **Add startup entry**:
+2. **Add startup entry** (adjust path as needed):
 ```bash
-@reboot cd /home/pi/pitft-monitor && python3 run_rpi_stats_ST7789.py
+@reboot cd /home/smare/dev/projects/rpi_server_stats && python3 run_rpi_stats_ST7789.py
 ```
 
 ## 🔧 Service Management
@@ -764,7 +765,7 @@ Feel free to submit issues, feature requests, or improvements!
 ### Development Setup
 ```bash
 git clone <repository>
-cd mini-pitft-monitor
+cd rpi_server_stats
 chmod +x prerequisites-run_rpi_stats_ST7789.sh
 ./prerequisites-run_rpi_stats_ST7789.sh
 ```

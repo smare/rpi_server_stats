@@ -42,8 +42,8 @@ elif grep -q "BCM2712" /proc/cpuinfo; then
 else
     print_warning "This script is optimized for Raspberry Pi 5"
     print_warning "For other Raspberry Pi models, use prerequisites-run_rpi_stats_ST7789.sh"
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
+    echo -n "Continue anyway? (y/N): "
+    read -r REPLY
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         exit 1
     fi
@@ -52,8 +52,8 @@ fi
 # Check if running as root (not recommended)
 if [ "$EUID" -eq 0 ]; then
     print_warning "Running as root. This script should be run as a regular user with sudo privileges."
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
+    echo -n "Continue anyway? (y/N): "
+    read -r REPLY
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         exit 1
     fi
@@ -74,23 +74,38 @@ sudo apt install -y build-essential python3-dev python3-smbus python3-pil python
 
 # Install Raspberry Pi 5 specific GPIO libraries
 print_status "Installing Raspberry Pi 5 GPIO libraries..."
-# First install the core libgpiod library
-sudo apt install -y libgpiod-dev libgpiod3
-if [ $? -eq 0 ]; then
-    print_success "Core GPIO libraries installed"
 
-    # Check if python3-gpiod is available in repositories
-    if apt-cache show python3-gpiod >/dev/null 2>&1; then
-        sudo apt install -y python3-gpiod
-        print_success "python3-gpiod installed via apt"
+# Detect which libgpiod version is available (Trixie uses libgpiod3, older uses libgpiod2)
+if apt-cache show libgpiod3 >/dev/null 2>&1; then
+    LIBGPIOD_PKG="libgpiod3"
+    print_status "Detected Debian Trixie (libgpiod3)"
+elif apt-cache show libgpiod2 >/dev/null 2>&1; then
+    LIBGPIOD_PKG="libgpiod2"
+    print_status "Detected Debian Bookworm (libgpiod2)"
+else
+    LIBGPIOD_PKG=""
+    print_warning "No libgpiod runtime package found"
+fi
+
+# Install GPIO packages
+GPIOD_VIA_PIP=false
+if [ -n "$LIBGPIOD_PKG" ]; then
+    sudo apt install -y libgpiod-dev "$LIBGPIOD_PKG" gpiod python3-libgpiod
+    if [ $? -eq 0 ]; then
+        print_success "Core GPIO libraries installed ($LIBGPIOD_PKG)"
     else
-        print_warning "python3-gpiod not available in repositories"
-        print_status "Will install gpiod via pip in virtual environment"
+        print_warning "Some GPIO packages failed, trying minimal install..."
+        sudo apt install -y libgpiod-dev gpiod || true
         GPIOD_VIA_PIP=true
     fi
 else
-    print_error "Failed to install core GPIO libraries"
-    print_status "Continuing without gpiod - script may not work on RPi 5"
+    print_status "Trying to install available GPIO packages..."
+    sudo apt install -y libgpiod-dev gpiod python3-libgpiod || true
+    GPIOD_VIA_PIP=true
+fi
+
+if [ "$GPIOD_VIA_PIP" = true ]; then
+    print_status "Will install gpiod via pip in virtual environment"
 fi
 
 # Install system packages for Python libraries (Debian way)
@@ -158,6 +173,7 @@ else
         echo "dtparam=spi=on" | sudo tee -a /boot/config.txt
     fi
     print_success "SPI interface enabled (reboot required)"
+    REBOOT_NEEDED=true
 fi
 
 # Check if I2C is already enabled
@@ -172,6 +188,7 @@ else
         echo "dtparam=i2c_arm=on" | sudo tee -a /boot/config.txt
     fi
     print_success "I2C interface enabled (reboot required)"
+    REBOOT_NEEDED=true
 fi
 
 # Create virtual environment as fallback option
@@ -208,7 +225,7 @@ fi
 # Verify installation
 print_status "Verifying installation..."
 
-# Test Python imports (system packages and virtual environment)
+# Test Python imports
 if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
     print_status "Testing imports with virtual environment (gpiod via pip)..."
     "$VENV_DIR/bin/python" -c "
@@ -241,7 +258,7 @@ if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
     "$VENV_DIR/bin/python" -c "
 try:
     import gpiod
-    chip = gpiod.Chip('gpiochip4')
+    chip = gpiod.Chip('/dev/gpiochip4')
     print('✓ Raspberry Pi 5 GPIO (gpiochip4) accessible via virtual environment')
     chip.close()
 except Exception as e:
@@ -252,7 +269,7 @@ else
     python3 -c "
 try:
     import gpiod
-    chip = gpiod.Chip('gpiochip4')
+    chip = gpiod.Chip('/dev/gpiochip4')
     print('✓ Raspberry Pi 5 GPIO (gpiochip4) accessible')
     chip.close()
 except Exception as e:
@@ -328,28 +345,14 @@ else
 fi
 
 # Check for reboot requirement
-CONFIG_FILE=""
-if [ -f "/boot/firmware/config.txt" ]; then
-    CONFIG_FILE="/boot/firmware/config.txt"
-elif [ -f "/boot/config.txt" ]; then
-    CONFIG_FILE="/boot/config.txt"
-fi
-
-REBOOT_REQUIRED=false
-if [ -n "$CONFIG_FILE" ]; then
-    if ! grep -q "^dtparam=spi=on" "$CONFIG_FILE" || ! grep -q "^dtparam=i2c_arm=on" "$CONFIG_FILE"; then
-        REBOOT_REQUIRED=true
-    fi
-fi
-
-if [ "$REBOOT_REQUIRED" = true ]; then
+if [ "${REBOOT_NEEDED:-false}" = true ]; then
     echo
     print_warning "REBOOT REQUIRED!"
     print_status "Hardware interfaces (SPI/I2C) have been enabled."
     print_status "Please reboot your Raspberry Pi 5 before running the display script."
     echo
-    read -p "Reboot now? (y/N): " -n 1 -r
-    echo
+    echo -n "Reboot now? (y/N): "
+    read -r REPLY
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         print_status "Rebooting..."
         sudo reboot
