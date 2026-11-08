@@ -17,6 +17,8 @@ Features:
 - Top running processes by memory usage
 - Color-coded page titles for easy identification
 - Bidirectional button navigation
+- AUTO-CYCLING: Automatically cycles through pages every 2 minutes
+- Manual button presses override auto-cycling temporarily
 - 180° display rotation for proper orientation
 
 Author: Sean Mare
@@ -29,6 +31,7 @@ import socket
 import psutil
 import signal
 import sys
+import threading
 from PIL import Image, ImageDraw, ImageFont
 import spidev
 import RPi.GPIO as GPIO
@@ -46,6 +49,15 @@ WIDTH = 240      # Display width in pixels
 HEIGHT = 240     # Display height in pixels
 SPI_SPEED = 8000000  # SPI communication speed (8MHz)
 
+# Auto-cycling Configuration
+# ==========================
+AUTO_CYCLE_INTERVAL = 120.0  # Auto-cycle every 2 minutes (120 seconds)
+
+# Button Polling Configuration
+# ============================
+BUTTON_POLL_INTERVAL = 0.005   # Poll the buttons every 5 ms in a background thread
+BUTTON_DEBOUNCE_SAMPLES = 4    # A new button level must hold for this many samples (about 20 ms)
+
 # Color Definitions
 # ================
 # Standard colors for UI elements
@@ -54,6 +66,7 @@ WHITE = (255, 255, 255)     # Primary text color
 BLUE = (0, 100, 255)        # Navigation text color
 GREEN = (0, 255, 0)         # Button instruction color
 RED = (255, 0, 0)           # Page indicator color
+PURPLE = (128, 0, 128)      # Auto-cycle indicator color
 
 # Bright colors for page-specific titles
 BRIGHT_YELLOW = (255, 255, 0)   # System Info page title
@@ -65,8 +78,15 @@ BRIGHT_ORANGE = (255, 165, 0)   # Top Processes page title
 spi = None                      # SPI device handle
 running = True                  # Main loop control flag
 current_page = 0               # Current displayed page (0=System, 1=Network, 2=Processes)
-last_button_a_state = True     # Previous state of button A (for debouncing)
-last_button_b_state = True     # Previous state of button B (for debouncing)
+last_auto_cycle_time = 0       # Time of last auto-cycle
+last_manual_interaction = 0    # Time of last manual button press
+manual_override_duration = 10.0  # Seconds to wait after a manual press before auto-cycling resumes
+
+# Button presses are detected by a background polling thread, so a press is never
+# lost while the main thread is busy redrawing the display.
+pending_presses = {BTN_A_PIN: 0, BTN_B_PIN: 0}   # Debounced presses waiting to be handled
+presses_lock = threading.Lock()                  # Protects pending_presses
+button_thread = None                             # Background button polling thread
 
 def cleanup():
     """
@@ -363,6 +383,7 @@ try:
     font = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuMonoNerdFont-Regular.ttf', 20)
     font_title = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuMonoNerdFont-Bold.ttf', 22)
     font_title_small = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuMonoNerdFont-Bold.ttf', 21)  # 1pt smaller for page 2
+    font_small = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuMonoNerdFont-Regular.ttf', 16)  # Small font for auto-cycle indicator
     print("Ubuntu Nerd Font loaded (MonoNerdFont)")
 except:
     try:
@@ -370,12 +391,14 @@ except:
         font = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuNerdFont-Regular.ttf', 20)
         font_title = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuNerdFont-Bold.ttf', 22)
         font_title_small = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuNerdFont-Bold.ttf', 21)  # 1pt smaller for page 2
+        font_small = ImageFont.truetype('/usr/share/fonts/truetype/UbuntuNerdFont/UbuntuNerdFont-Regular.ttf', 16)  # Small font for auto-cycle indicator
         print("Ubuntu Nerd Font loaded (NerdFont)")
     except:
         # Use system default fonts as last resort
         font = ImageFont.load_default()
         font_title = ImageFont.load_default()
         font_title_small = ImageFont.load_default()
+        font_small = ImageFont.load_default()
         print("Using default fonts (UbuntuNerdFont not found)")
 
 def get_system_data():
@@ -486,6 +509,61 @@ def get_top_processes():
     except:
         return [("Error", 0)]
 
+def get_auto_cycle_status():
+    """
+    Get auto-cycle status information for display.
+
+    Returns:
+        tuple: (is_auto_cycling, time_until_next_cycle)
+    """
+    global last_auto_cycle_time, last_manual_interaction, manual_override_duration
+
+    current_time = time.time()
+
+    # Check if we're in manual override period
+    time_since_manual = current_time - last_manual_interaction
+    is_in_manual_override = time_since_manual < manual_override_duration
+
+    if is_in_manual_override:
+        # Manual override active - no auto-cycling
+        return False, manual_override_duration - time_since_manual
+    else:
+        # Auto-cycling active
+        time_since_last_cycle = current_time - last_auto_cycle_time
+        time_until_next = AUTO_CYCLE_INTERVAL - time_since_last_cycle
+        return True, max(0, time_until_next)
+
+def check_auto_cycle():
+    """
+    Check if it's time to auto-cycle to the next page.
+
+    Returns:
+        bool: True if auto-cycle should occur, False otherwise
+    """
+    global last_auto_cycle_time, last_manual_interaction, current_page
+
+    current_time = time.time()
+
+    # Check if we're in manual override period
+    time_since_manual = current_time - last_manual_interaction
+    is_in_manual_override = time_since_manual < manual_override_duration
+
+    if is_in_manual_override:
+        # Don't auto-cycle during manual override
+        return False
+
+    # Check if it's time for auto-cycle
+    time_since_last_cycle = current_time - last_auto_cycle_time
+
+    if time_since_last_cycle >= AUTO_CYCLE_INTERVAL:
+        # Time to auto-cycle
+        current_page = (current_page + 1) % 3  # Cycle to next page
+        last_auto_cycle_time = current_time
+        print(f"Auto-cycled to page {current_page}")
+        return True
+
+    return False
+
 def create_page(page_num):
     """
     Create a page image with system information.
@@ -495,7 +573,8 @@ def create_page(page_num):
     - Page 1: Network information (Interface, Sent/Received data)
     - Page 2: Top processes by memory usage
 
-    Each page has a unique color-coded title and consistent navigation instructions.
+    Each page has a unique color-coded title, consistent navigation instructions,
+    and an auto-cycle status indicator.
 
     Args:
         page_num (int): Page number to create (0, 1, or 2)
@@ -506,6 +585,9 @@ def create_page(page_num):
     # Create blank image with black background
     image = Image.new("RGB", (WIDTH, HEIGHT), BLACK)
     draw = ImageDraw.Draw(image)
+
+    # Get auto-cycle status
+    is_auto_cycling, time_remaining = get_auto_cycle_status()
 
     if page_num == 0:
         # Page 0: System Information
@@ -522,9 +604,17 @@ def create_page(page_num):
         draw.text((10, 95), f"Disk: {disk}", font=font, fill=WHITE)
         draw.text((10, 115), f"Temp: {temp}", font=font, fill=WHITE)
 
+        # Auto-cycle status
+        if is_auto_cycling:
+            mins, secs = divmod(int(time_remaining), 60)
+            draw.text((10, 140), f"Auto: {mins}:{secs:02d}", font=font_small, fill=PURPLE)
+        else:
+            override_remaining = int(time_remaining)
+            draw.text((10, 140), f"Manual: {override_remaining}s", font=font_small, fill=PURPLE)
+
         # Navigation instructions at bottom
-        draw.text((10, 180), "Bottom: <- Prev", font=font, fill=GREEN)
-        draw.text((10, 205), "Top: Next ->", font=font, fill=GREEN)
+        draw.text((10, 180), "Top: Next ->", font=font, fill=GREEN)
+        draw.text((10, 205), "Bottom: <- Prev", font=font, fill=GREEN)
 
     elif page_num == 1:
         # Page 1: Network Information
@@ -539,9 +629,17 @@ def create_page(page_num):
         draw.text((10, 55), f"Sent: {sent}", font=font, fill=WHITE)
         draw.text((10, 75), f"Received: {recv}", font=font, fill=WHITE)
 
+        # Auto-cycle status
+        if is_auto_cycling:
+            mins, secs = divmod(int(time_remaining), 60)
+            draw.text((10, 100), f"Auto: {mins}:{secs:02d}", font=font_small, fill=PURPLE)
+        else:
+            override_remaining = int(time_remaining)
+            draw.text((10, 100), f"Manual: {override_remaining}s", font=font_small, fill=PURPLE)
+
         # Navigation instructions
-        draw.text((10, 180), "Bottom: <- Prev", font=font, fill=GREEN)
-        draw.text((10, 205), "Top: Next ->", font=font, fill=GREEN)
+        draw.text((10, 180), "Top: Next ->", font=font, fill=GREEN)
+        draw.text((10, 205), "Bottom: <- Prev", font=font, fill=GREEN)
 
     else:
         # Page 2: Top Processes
@@ -559,22 +657,78 @@ def create_page(page_num):
             draw.text((10, y), f"{i+1}. {short_name} {mem:.1f}%", font=font, fill=WHITE)
             y += 20  # 20px spacing between process entries
 
+        # Auto-cycle status (positioned after processes)
+        if is_auto_cycling:
+            mins, secs = divmod(int(time_remaining), 60)
+            draw.text((10, 155), f"Auto: {mins}:{secs:02d}", font=font_small, fill=PURPLE)
+        else:
+            override_remaining = int(time_remaining)
+            draw.text((10, 155), f"Manual: {override_remaining}s", font=font_small, fill=PURPLE)
+
         # Navigation instructions
-        draw.text((10, 180), "Bottom: <- Prev", font=font, fill=GREEN)
-        draw.text((10, 205), "Top: Next ->", font=font, fill=GREEN)
+        draw.text((10, 180), "Top: Next ->", font=font, fill=GREEN)
+        draw.text((10, 205), "Bottom: <- Prev", font=font, fill=GREEN)
 
     # Page indicator in top-right corner
     draw.text((WIDTH-25, 10), f"P{page_num}", font=font_title, fill=RED)
 
     return image
 
+def button_poller():
+    """
+    Background thread: poll both buttons and record debounced presses.
+
+    Runs about 200 times per second, independent of the main loop, so a button
+    press is never missed while the main thread is busy redrawing the display
+    (a redraw takes a few tenths of a second on slower Raspberry Pi models).
+
+    A change of level is accepted only after it has been seen on several
+    consecutive samples, which filters out contact bounce on both press and
+    release. Each accepted press adds one to pending_presses for that button.
+    """
+    try:
+        # Start from the current level so a button held at startup is not counted as a press
+        state = {pin: not GPIO.input(pin) for pin in (BTN_A_PIN, BTN_B_PIN)}  # True = pressed
+    except Exception as e:
+        print(f"Button polling error: {e}")
+        return
+    count = {BTN_A_PIN: 0, BTN_B_PIN: 0}  # Consecutive samples that disagree with state
+
+    while running:
+        try:
+            for pin in (BTN_A_PIN, BTN_B_PIN):
+                pressed = not GPIO.input(pin)  # Active low: pressed = False
+                if pressed == state[pin]:
+                    count[pin] = 0
+                else:
+                    count[pin] += 1
+                    if count[pin] >= BUTTON_DEBOUNCE_SAMPLES:
+                        state[pin] = pressed
+                        count[pin] = 0
+                        if pressed:
+                            with presses_lock:
+                                pending_presses[pin] += 1
+        except Exception as e:
+            if running:
+                print(f"Button polling error: {e}")
+            return
+        time.sleep(BUTTON_POLL_INTERVAL)
+
+def start_button_poller():
+    """Start the background button polling thread (call after the GPIO pins are set up)."""
+    global button_thread
+    button_thread = threading.Thread(target=button_poller, name="button-poller", daemon=True)
+    button_thread.start()
+
 def check_buttons():
     """
-    Check button states and handle page navigation.
+    Handle button presses recorded by the background polling thread.
 
-    Implements debouncing logic to prevent multiple triggers from a single
-    button press. Updates the global current_page variable when buttons
-    are pressed.
+    The polling thread (button_poller) debounces both buttons and counts each
+    press, so presses made while the display is being redrawn are not lost.
+    Each press updates the global current_page variable, records the time of
+    the manual interaction (which pauses auto-cycling) and restarts the
+    auto-cycle timer.
 
     Button mapping:
     - Bottom button (GPIO 23): Previous page (decrements page number)
@@ -583,44 +737,37 @@ def check_buttons():
     Pages wrap around: 0 -> 1 -> 2 -> 0 (forward) or 0 -> 2 -> 1 -> 0 (backward)
 
     Returns:
-        bool: True if page changed, False otherwise
+        bool: True if at least one button press was handled, False otherwise
     """
-    global current_page, last_button_a_state, last_button_b_state
+    global current_page, last_manual_interaction, last_auto_cycle_time
 
     if not running:
         return False
 
-    try:
-        # Read current button states (active low - pressed = False)
-        btn_a_pressed = not GPIO.input(BTN_A_PIN)  # Bottom button
-        btn_b_pressed = not GPIO.input(BTN_B_PIN)  # Top button
+    # Take all presses recorded since the last call
+    with presses_lock:
+        presses_a = pending_presses[BTN_A_PIN]
+        presses_b = pending_presses[BTN_B_PIN]
+        pending_presses[BTN_A_PIN] = 0
+        pending_presses[BTN_B_PIN] = 0
 
-        page_changed = False
-
-        # Check left button (GPIO 23) - Previous page
-        # Only trigger on press edge (was not pressed, now pressed)
-        if btn_a_pressed and not last_button_a_state:
-            current_page = (current_page - 1) % 3  # Wrap around: 0->2, 1->0, 2->1
-            print(f"Bottom button pressed! Switched to page {current_page}")
-            page_changed = True
-
-        # Check right button (GPIO 24) - Next page
-        # Only trigger on press edge (was not pressed, now pressed)
-        if btn_b_pressed and not last_button_b_state:
-            current_page = (current_page + 1) % 3  # Wrap around: 0->1, 1->2, 2->0
-            print(f"Top button pressed! Switched to page {current_page}")
-            page_changed = True
-
-        # Update button states for next iteration (debouncing)
-        last_button_a_state = btn_a_pressed
-        last_button_b_state = btn_b_pressed
-
-        return page_changed
-
-    except Exception as e:
-        if running:
-            print(f"Button error: {e}")
+    if presses_a == 0 and presses_b == 0:
         return False
+
+    # Any press starts the manual override period and restarts the auto-cycle timer
+    current_time = time.time()
+    last_manual_interaction = current_time
+    last_auto_cycle_time = current_time
+
+    for _ in range(presses_a):
+        current_page = (current_page - 1) % 3  # Wrap around: 0->2, 1->0, 2->1
+        print(f"Bottom button pressed! Switched to page {current_page} (manual override)")
+
+    for _ in range(presses_b):
+        current_page = (current_page + 1) % 3  # Wrap around: 0->1, 1->2, 2->0
+        print(f"Top button pressed! Switched to page {current_page} (manual override)")
+
+    return True
 
 def main():
     """
@@ -630,43 +777,64 @@ def main():
     - Display initialization
     - Startup screen display
     - Main monitoring loop with button checking
-    - Periodic display updates (every 5 seconds)
+    - Periodic display updates (every 3 seconds for pages 0 and 1, 1.5 seconds for page 2)
+    - Auto-cycling every 2 minutes (with manual override)
     - Graceful shutdown on Ctrl+C
 
-    The main loop runs at 10Hz (100ms intervals) for responsive button handling
-    while updating system data every 5 seconds to balance responsiveness with
-    system load.
+    The main loop runs at 10Hz (100ms intervals) while updating system data every
+    1.5-3 seconds and auto-cycling every 2 minutes to balance responsiveness with
+    system load. Button presses are recorded by a background polling thread, so
+    none are lost while the display is being redrawn.
     """
-    global running
+    global running, last_auto_cycle_time, last_manual_interaction
 
     # Set up signal handler for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
 
-    print("Mini PiTFT System Monitor - 180° Rotation with Bidirectional Button Navigation")
-    print("=============================================================================")
+    print("Mini PiTFT System Monitor - 180° Rotation with Auto-Cycling")
+    print("===========================================================")
 
     # Initialize display hardware
     if not init_display():
         print("Display initialization failed")
         return
 
+    # Initialize timing variables
+    current_time = time.time()
+    last_auto_cycle_time = current_time
+    last_manual_interaction = 0  # No manual interaction at start
+
+    # Start background button polling (the GPIO pins are set up by init_display)
+    start_button_poller()
+
     # Show startup screen with instructions
     print("Showing startup message...")
     startup_image = Image.new("RGB", (WIDTH, HEIGHT), BLACK)
     draw = ImageDraw.Draw(startup_image)
-    draw.text((60, 90), "System Monitor", font=font_title, fill=WHITE)
-    draw.text((80, 110), "Starting...", font=font, fill=GREEN)
+    draw.text((40, 80), "System Monitor", font=font_title, fill=WHITE)
+    draw.text((85, 100), "Ready!", font=font, fill=GREEN)
+    draw.text((30, 125), "Auto-Cycling: 2min", font=font_small, fill=PURPLE)
+    draw.text((10, 160), "Top: Next ->", font=font, fill=BLUE)
     draw.text((10, 180), "Bottom: <- Prev", font=font, fill=BLUE)
-    draw.text((10, 205), "Top: Next ->", font=font, fill=BLUE)
+    draw.text((10, 205), "Buttons pause auto", font=font_small, fill=PURPLE)
     display_image_corrected(startup_image)
-    time.sleep(3)  # Show startup message for 3 seconds
+    time.sleep(4)  # Show startup message for 4 seconds
 
     # Display initial page (page 0 - system info)
     print("Displaying initial page...")
     page_image = create_page(current_page)
     display_image_corrected(page_image)
 
+    # Ignore any button presses made during the startup screen
+    with presses_lock:
+        pending_presses[BTN_A_PIN] = 0
+        pending_presses[BTN_B_PIN] = 0
+
     # Print control instructions to console
+    print("\nAuto-Cycling Features:")
+    print("  - Automatically cycles through pages every 2 minutes")
+    print("  - Manual button presses pause auto-cycling for 10 seconds")
+    print("  - Purple indicator shows auto-cycle status and timing")
     print("\nButton Controls:")
     print("  Bottom button: Previous page")
     print("  Top button: Next page")
@@ -681,20 +849,29 @@ def main():
     try:
         # Main monitoring loop
         while running:
-            current_time = time.time()
+            # Check for manual button presses and update display if page changed
+            manual_page_change = check_buttons()
 
-            # Check for button presses and update display if page changed
-            if check_buttons():
+            # Check for auto-cycle page change (only if no manual change occurred)
+            auto_page_change = False
+            if not manual_page_change:
+                auto_page_change = check_auto_cycle()
+
+            # Update display if page changed (either manually or automatically)
+            if manual_page_change or auto_page_change:
                 print(f"Updating display for page {current_page}...")
                 page_image = create_page(current_page)
                 display_image_corrected(page_image)
-                time.sleep(0.1)  # Brief pause after page change for debouncing
+                last_update = time.time()  # The page was just redrawn, so restart the refresh timer
 
-            # Update display every 5 seconds with fresh data
-            if current_time - last_update >= 5.0:
+            # Different refresh rates for different pages
+            refresh_interval = 1.5 if current_page == 2 else 3.0  # Page 2 refreshes faster
+
+            # Update display with fresh data (but not more often than the refresh interval)
+            if time.time() - last_update >= refresh_interval:
                 page_image = create_page(current_page)
                 display_image_corrected(page_image)
-                last_update = current_time
+                last_update = time.time()
 
             # Sleep briefly to prevent excessive CPU usage while maintaining responsiveness
             time.sleep(0.1)  # 10Hz loop rate

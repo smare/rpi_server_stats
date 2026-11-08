@@ -92,24 +92,19 @@ A comprehensive real-time system monitoring solution for Raspberry Pi 5 using th
 
 ### 1. Install Prerequisites (Raspberry Pi 5)
 ```bash
-# Make the Raspberry Pi 5 setup script executable
-chmod +x prerequisites-run_rpi5_stats_ST7789.sh
-
-# Run the Raspberry Pi 5 installation
-./prerequisites-run_rpi5_stats_ST7789.sh
+# Run the Raspberry Pi 5 installer with bash (no chmod needed)
+bash ./prerequisites-run_rpi5_stats_ST7789.sh
 ```
+
+The installer asks for your `sudo` password. It only installs what is missing (see [Prerequisites Installation Scripts](#prerequisites-installation-scripts)).
 
 **For other Raspberry Pi models (≤4)**, use the RPi.GPIO version:
 ```bash
-# Make the script executable
-chmod +x prerequisites-run_rpi_stats_ST7789.sh
-
-# Run the installation
-./prerequisites-run_rpi_stats_ST7789.sh
+bash ./prerequisites-run_rpi_stats_ST7789.sh
 ```
 
 ### 2. Reboot (if required)
-The installer will prompt you to reboot if SPI/I2C interfaces were enabled:
+The installer will prompt you to reboot if it just enabled the SPI/I2C interfaces, or if the SPI device (`/dev/spidev0.0`) is not active yet:
 ```bash
 sudo reboot
 ```
@@ -118,10 +113,10 @@ sudo reboot
 
 **Raspberry Pi 5 (Recommended Method):**
 ```bash
-# Direct execution (if system packages work)
+# Direct execution (the normal case)
 python3 run_rpi5_stats_ST7789.py
 
-# Or with virtual environment (if gpiod was installed via pip)
+# Only if the installer reported that it created a virtual environment (gpiod installed via pip)
 ~/pitft_venv/bin/python run_rpi5_stats_ST7789.py
 ```
 
@@ -131,198 +126,64 @@ python3 run_rpi_stats_ST7789.py
 ```
 
 ### 4. Configure Automatic Startup (Optional)
-```bash
-# Make the startup script executable
-chmod +x setup_startup.sh
 
-# Configure automatic startup
-./setup_startup.sh
-```
+To start the monitor automatically at boot, follow [set-up-script-as-a-service.md](../../set-up-script-as-a-service.md). It covers the systemd service for this script (`pitft-rpi5-monitor.service`), the management commands (start, stop, restart, logs) and troubleshooting.
 
-## 🔄 Automatic Startup Configuration
-
-### Method 1: Automated Setup (Recommended)
-Use the provided script to automatically configure startup:
-
-```bash
-chmod +x setup_startup.sh
-./setup_startup.sh
-```
-
-This script will:
-- Create a systemd service file
-- Enable the service for automatic startup
-- Start the service immediately
-- Show service status and management commands
-
-### Method 2: Manual Systemd Service
-
-1. **Create service file**:
-```bash
-sudo nano /etc/systemd/system/pitft-monitor.service
-```
-
-2. **Add service configuration** (adjust paths and username as needed):
-```ini
-[Unit]
-Description=Mini PiTFT System Monitor with Auto-Cycling (RPi 5)
-After=multi-user.target
-
-[Service]
-Type=simple
-User=smare
-WorkingDirectory=/home/smare/dev/projects/rpi_server_stats
-ExecStart=/usr/bin/python3 /home/smare/dev/projects/rpi_server_stats/run_rpi5_stats_ST7789.py
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-3. **Enable and start service**:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable pitft-monitor.service
-sudo systemctl start pitft-monitor.service
-```
-
-### Method 3: RC.LOCAL (Alternative)
-
-1. **Edit rc.local**:
-```bash
-sudo nano /etc/rc.local
-```
-
-2. **Add before `exit 0`** (adjust paths and username as needed):
-```bash
-# Start Mini PiTFT System Monitor with Auto-Cycling (RPi 5)
-cd /home/smare/dev/projects/rpi_server_stats
-python3 run_rpi5_stats_ST7789.py &
-```
-
-### Method 4: Crontab (Alternative)
-
-1. **Edit crontab**:
-```bash
-crontab -e
-```
-
-2. **Add startup entry** (adjust path as needed):
-```bash
-@reboot cd /home/smare/dev/projects/rpi_server_stats && python3 run_rpi5_stats_ST7789.py
-```
-
-## 🔧 Service Management
-
-### Systemd Commands
-```bash
-# Check service status
-sudo systemctl status pitft-monitor.service
-
-# Start service
-sudo systemctl start pitft-monitor.service
-
-# Stop service
-sudo systemctl stop pitft-monitor.service
-
-# Restart service
-sudo systemctl restart pitft-monitor.service
-
-# View logs
-sudo journalctl -u pitft-monitor.service -f
-
-# Disable startup
-sudo systemctl disable pitft-monitor.service
-
-# Re-enable startup
-sudo systemctl enable pitft-monitor.service
-```
-
-### Service Status Indicators
-- **Active (running)** - Service is running normally
-- **Failed** - Service encountered an error
-- **Inactive (dead)** - Service is stopped
-
-### Troubleshooting Startup Issues
-```bash
-# Check service logs
-sudo journalctl -u pitft-monitor.service --since "10 minutes ago"
-
-# Check system boot logs
-sudo journalctl -b
-
-# Verify file permissions
-ls -la /home/pi/pitft-monitor/run_RPi5_ST7789.py
-
-# Test manual run
-cd /home/pi/pitft-monitor
-python3 run_RPi5_ST7789.py
-```
+If the installer created the virtual environment (`~/pitft_venv`), point the service at `~/pitft_venv/bin/python` instead of `/usr/bin/python3`.
 
 ## 📦 Manual Installation
 
 ### Prerequisites Installation Scripts
 
-The project includes two installation scripts for different Raspberry Pi models:
+The project includes two installation scripts for different Raspberry Pi models. Run them with bash (no chmod needed); both also re-launch themselves under bash if you start them with `sh`.
 
 #### Raspberry Pi 5 (Modern gpiod Method)
 ```bash
-chmod +x prerequisites-run_rpi5_stats_ST7789.sh
-./prerequisites-run_rpi5_stats_ST7789.sh
+bash ./prerequisites-run_rpi5_stats_ST7789.sh
 ```
 
-**Features of the RPi 5 installer:**
-- **Automatic RPi 5 detection** - Verifies BCM2712 chip and Pi 5 compatibility
-- **Debian version detection** - Auto-detects Trixie (libgpiod3) vs Bookworm (libgpiod2)
-- **Modern GPIO libraries** - Installs libgpiod and python3-libgpiod for RPi 5
-- **Intelligent package management** - Uses apt packages when available, pip fallback
-- **Virtual environment setup** - Creates backup environment for package isolation
-- **Hardware interface configuration** - Enables SPI/I2C with proper config.txt paths
-- **UbuntuNerdFont installation** - Downloads and installs optimal display fonts
-- **Comprehensive verification** - Tests all imports and GPIO chip access
-- **Reboot management** - Handles automatic reboot when interfaces are enabled
+**What the RPi 5 installer does:**
+- **RPi 5 detection** - Checks for a Raspberry Pi 5 and asks before continuing on other models
+- **OS and libgpiod detection** - Prints the OS release and picks `libgpiod3` (Trixie) or `libgpiod2` (Bookworm)
+- **Modern GPIO libraries** - Installs `libgpiod-dev`, the libgpiod runtime, `gpiod` and `python3-libgpiod` through apt; if that fails it installs `gpiod` with pip in a virtual environment
+- **Installs only what is needed** - No full Python bundle (`python3-full`), and no build tools unless the pip fallback is used
+- **Virtual environment only as a fallback** - `~/pitft_venv` is created only if gpiod could not be installed through apt, or the system packages cannot be imported
+- **Hardware interface configuration** - Enables SPI/I2C in the right config.txt (`/boot/firmware/config.txt` or `/boot/config.txt`)
+- **UbuntuNerdFont installation** - Downloads and installs the display font if it is not present
+- **Verification** - Tests the imports, access to the GPIO chip (`/dev/gpiochip4`) and font loading
+- **Reboot prompt** - Asks whether to reboot if it enabled SPI/I2C, or if `/dev/spidev0.0` is not there yet
 
 #### Legacy Raspberry Pi Models (≤4) (RPi.GPIO Method)
 ```bash
-chmod +x prerequisites-run_rpi_stats_ST7789.sh
-./prerequisites-run_rpi_stats_ST7789.sh
+bash ./prerequisites-run_rpi_stats_ST7789.sh
 ```
+See [the Raspberry Pi ≤4 README](../rpi/README.md) for what that installer does.
 
 ### Manual System Package Installation
 
 **For Raspberry Pi 5:**
 ```bash
 sudo apt update
-sudo apt install -y python3-pip python3-dev python3-gpiod python3-spidev python3-psutil python3-pil
-sudo apt install -y libgpiod-dev libgpiod2 fonts-dejavu-core fonts-ubuntu-font-family
+sudo apt install -y python3-pip python3-setuptools git python3-venv python3-smbus python3-pil python3-numpy
+sudo apt install -y libgpiod-dev libgpiod3 gpiod python3-libgpiod python3-spidev python3-psutil
 ```
+Use `libgpiod2` instead of `libgpiod3` on Debian Bookworm (check with `apt-cache show libgpiod3`). Fonts: see Ubuntu Nerd Font below.
 
-**For other Raspberry Pi models:**
-```bash
-sudo apt update
-sudo apt install -y python3-pip python3-dev fonts-dejavu-core fonts-ubuntu-font-family
-```
+**For other Raspberry Pi models:** see [the Raspberry Pi ≤4 README](../rpi/README.md#manual-system-package-installation).
 
 ### Python Dependencies
 
-**Raspberry Pi 5 (with virtual environment if needed):**
-```bash
-# Try system packages first
-pip3 install --user psutil Pillow spidev gpiod
+**Raspberry Pi 5:** the apt packages above provide everything the script imports (`spidev`, `gpiod`, `psutil`, `PIL`).
 
-# If gpiod fails, use virtual environment
+**Virtual environment (fallback, only if gpiod cannot be installed through apt):** recent Raspberry Pi OS releases block `pip install` into the system Python, so use pip only inside a virtual environment. The installer creates one automatically when needed.
+```bash
+sudo apt install -y build-essential python3-dev python3-venv libgpiod-dev
 python3 -m venv ~/pitft_venv
 source ~/pitft_venv/bin/activate
 pip install psutil Pillow spidev gpiod
 ```
 
-**Other Raspberry Pi models:**
-```bash
-pip3 install --user psutil Pillow spidev RPi.GPIO
-```
+**Other Raspberry Pi models:** see [the Raspberry Pi ≤4 README](../rpi/README.md#python-dependencies).
 
 ### Ubuntu Nerd Font (Recommended)
 For optimal display quality, the Raspberry Pi 5 installer automatically downloads and installs Ubuntu Nerd Font. For manual installation:
@@ -442,14 +303,14 @@ except Exception as e:
 #### Installation Script Issues
 ```bash
 # Re-run installation with verbose output
-bash -x prerequisites-run_RPi5_ST7789.sh
+bash -x prerequisites-run_rpi5_stats_ST7789.sh
 
 # Check installation script permissions
-ls -la prerequisites-run_RPi5_ST7789.sh
+ls -la prerequisites-run_rpi5_stats_ST7789.sh
 
 # Manual execution of script components
 sudo apt update
-sudo apt install -y python3-gpiod libgpiod-dev
+sudo apt install -y python3-libgpiod libgpiod-dev
 ```
 
 #### Virtual Environment Issues
@@ -499,10 +360,8 @@ for module in pil_modules:
         print(f'✗ {module} - not available')
 "
 
-# Check if reboot is required
-if grep -q "REBOOT REQUIRED" ~/.bash_history 2>/dev/null; then
-    echo "Reboot may be required for SPI/I2C interfaces"
-fi
+# Check if the SPI device is active (if it is missing, reboot)
+ls -l /dev/spidev0.0 || echo "SPI device not active - reboot, or enable SPI first"
 ```
 
 #### Permission Errors (RPi 5)
@@ -527,11 +386,11 @@ If the Raspberry Pi 5 installer created a virtual environment (when gpiod needs 
 source ~/pitft_venv/bin/activate
 
 # Run script with virtual environment
-~/pitft_venv/bin/python run_RPi5_ST7789.py
+~/pitft_venv/bin/python run_rpi5_stats_ST7789.py
 
 # Or activate first, then run normally
 source ~/pitft_venv/bin/activate
-python run_RPi5_ST7789.py
+python run_rpi5_stats_ST7789.py
 
 # Deactivate when done
 deactivate
@@ -542,7 +401,7 @@ deactivate
 ## 🎮 Usage
 
 ### Basic Operation
-- **Start**: Run `python3 run_RPi5_ST7789.py`
+- **Start**: Run `python3 run_rpi5_stats_ST7789.py`
 - **Auto-Cycling**: Pages change automatically every 2 minutes
 - **Manual Navigation**: 
   - **Bottom button (GPIO 23)**: Previous page
@@ -565,6 +424,7 @@ deactivate
 
 ### Console Output
 ```
+Ubuntu Nerd Font loaded (MonoNerdFont)
 Mini PiTFT System Monitor - Raspberry Pi 5 Compatible with Auto-Cycling
 =======================================================================
 Initializing display for Raspberry Pi 5...
@@ -596,8 +456,11 @@ Hardware:
 
 Press Ctrl+C to exit
 Auto-cycled to page 1
+Updating display for page 1...
 Bottom button pressed! Switched to page 0 (manual override)
+Updating display for page 0...
 Top button pressed! Switched to page 1 (manual override)
+Updating display for page 1...
 ```
 
 ## 🔧 Technical Details
@@ -625,7 +488,7 @@ Top button pressed! Switched to page 1 (manual override)
 - **Adaptive Refresh**: 3s system/network, 1.5s processes
 - **CPU Impact**: Minimal (~1-2% CPU usage)
 - **Memory Usage**: ~20-25MB RAM
-- **Button Response**: <100ms response time
+- **Button Response**: <100ms response time (the main loop polls the buttons at 10Hz, so a press made while the display is redrawing can be missed; the Raspberry Pi ≤4 version reads the buttons in a background thread to avoid this)
 - **Auto-cycle Accuracy**: ±100ms timing precision
 
 ## 🛠️ Troubleshooting
@@ -678,11 +541,15 @@ groups $USER | grep -E "gpio|spi"
 
 #### Button Not Responding
 ```bash
-# Test GPIO with gpiod tools
-gpioinfo gpiochip4 | grep -E "23|24"
+# Test GPIO with gpiod tools (libgpiod v2.x, Debian Trixie)
+gpioinfo -c gpiochip4 | grep -E "23|24"
 
-# Monitor button presses
-gpiomonitor gpiochip4 23 24
+# Monitor button presses (libgpiod v2.x)
+gpiomon -c gpiochip4 23 24
+
+# libgpiod v1.x (Debian Bookworm) takes the chip as a plain argument:
+#   gpioinfo gpiochip4 | grep -E "23|24"
+#   gpiomon gpiochip4 23 24
 ```
 
 #### Auto-Cycling Issues
@@ -700,11 +567,11 @@ gpiomonitor gpiochip4 23 24
 # Check Python packages (RPi 5)
 python3 -c "import psutil, PIL, spidev, gpiod; print('All imports OK')"
 
-# Install missing dependencies
-pip3 install --user psutil Pillow spidev gpiod
+# Install missing dependencies (system packages)
+sudo apt install -y python3-psutil python3-pil python3-spidev python3-libgpiod
 
 # Reinstall if needed
-pip3 install --user --force-reinstall psutil Pillow spidev gpiod
+sudo apt install --reinstall -y python3-psutil python3-pil python3-spidev python3-libgpiod
 ```
 
 #### Font Issues
@@ -732,7 +599,7 @@ except:
 | Error | Solution |
 |-------|----------|
 | `No module named 'gpiod'` | Run `sudo apt install python3-libgpiod` |
-| `No module named 'spidev'` | Run `pip3 install --user spidev` |
+| `No module named 'spidev'` | Run `sudo apt install python3-spidev` |
 | `SPI device not found` | Enable SPI: `sudo raspi-config` → Interface Options → SPI |
 | `Permission denied /dev/spidev0.0` | Add user to spi group: `sudo usermod -a -G spi $USER` |
 | `Could not determine gpiod API version` | Install proper gpiod: `sudo apt install python3-libgpiod` |
@@ -743,8 +610,8 @@ except:
 
 ## 📊 System Requirements
 
-- **Raspberry Pi**: Pi 5 (primary), compatible with other models using RPi.GPIO fallback
-- **OS**: Raspberry Pi OS (Bookworm or newer recommended for Pi 5)
+- **Raspberry Pi**: Raspberry Pi 5 (for Raspberry Pi 4 and older use the RPi.GPIO version, see [doc/rpi/README.md](../rpi/README.md))
+- **OS**: Raspberry Pi OS (Bookworm or Trixie)
 - **Python**: 3.9 or newer (for gpiod compatibility)
 - **Memory**: Minimum 1GB RAM (Pi 5 requirement)
 - **Storage**: ~100MB for dependencies and fonts
@@ -815,10 +682,9 @@ Feel free to submit issues, feature requests, or improvements!
 
 ### Development Setup
 ```bash
-git clone <repository>
+git clone https://github.com/smare/rpi_server_stats.git
 cd rpi_server_stats
-chmod +x prerequisites-run_rpi5_stats_ST7789.sh
-./prerequisites-run_rpi5_stats_ST7789.sh
+bash ./prerequisites-run_rpi5_stats_ST7789.sh
 ```
 
 ### Feature Requests

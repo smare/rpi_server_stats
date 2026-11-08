@@ -12,7 +12,7 @@ A comprehensive real-time system monitoring solution for Raspberry Pi using the 
 ## ✨ Features
 
 - **🔄 Perfect 180° Display Rotation** - Optimized for upside-down mounting
-- **🖱️ Dual Button Navigation** - GPIO 23 & 24 buttons for bidirectional page control
+- **🖱️ Dual Button Navigation** - GPIO 23 & 24 buttons for bidirectional page control, read by a background thread with debouncing so quick presses are not missed
 - **⏰ Intelligent Auto-Cycling** - Automatically rotates through pages every 2 minutes
 - **⏸️ Smart Manual Override** - Button presses pause auto-cycling for 10 seconds
 - **📊 Real-time Monitoring** - System, network, and process statistics
@@ -84,29 +84,27 @@ A comprehensive real-time system monitoring solution for Raspberry Pi using the 
 ### Raspberry Pi Compatibility
 - **GPIO Library**: RPi.GPIO (legacy GPIO interface)
 - **Models Supported**: Raspberry Pi Zero, Zero 2 W, 3, 4 (all models ≤4)
-- **OS Support**: Raspberry Pi OS (Bullseye, Bookworm)
+- **OS Support**: Raspberry Pi OS (Bullseye, Bookworm, Trixie)
 - **Note**: For Raspberry Pi 5, use `run_rpi5_stats_ST7789.py` with gpiod instead
 
 ## 🚀 Quick Setup
 
 ### 1. Install Prerequisites
 ```bash
-# Make the setup script executable
-chmod +x prerequisites-run_rpi_stats_ST7789.sh
-
-# Run the installation with auto-cycling support
-./prerequisites-run_rpi_stats_ST7789.sh
+# Run the installer with bash (no chmod needed)
+bash ./prerequisites-run_rpi_stats_ST7789.sh
 ```
+
+The installer asks for your `sudo` password. It only installs what is missing and does not replace packages that already provide `RPi.GPIO` (see [Prerequisites Installation Script](#prerequisites-installation-script)).
 
 **For Raspberry Pi 5**, use the gpiod version instead:
 ```bash
 # RPi 5 requires gpiod - see doc/rpi5/README.md
-chmod +x prerequisites-run_rpi5_stats_ST7789.sh
-./prerequisites-run_rpi5_stats_ST7789.sh
+bash ./prerequisites-run_rpi5_stats_ST7789.sh
 ```
 
 ### 2. Reboot (if required)
-The installer will prompt you to reboot if SPI/I2C interfaces were enabled:
+The installer will prompt you to reboot if it just enabled the SPI/I2C interfaces, or if the SPI device (`/dev/spidev0.0`) is not active yet:
 ```bash
 sudo reboot
 ```
@@ -118,7 +116,7 @@ sudo reboot
 python3 run_rpi_stats_ST7789.py
 ```
 
-**Virtual environment (if system packages fail):**
+**Virtual environment (only if the installer reported that the system packages are not usable):**
 ```bash
 # Activate virtual environment
 source ~/pitft_venv/bin/activate
@@ -129,182 +127,60 @@ python run_rpi_stats_ST7789.py
 ```
 
 ### 4. Configure Automatic Startup (Optional)
-```bash
-# Make the startup script executable
-chmod +x setup_startup.sh
 
-# Configure automatic startup
-./setup_startup.sh
-```
+To start the monitor automatically at boot, follow [set-up-script-as-a-service.md](../../set-up-script-as-a-service.md). It covers the systemd service for this script (`pitft-rpi-monitor.service`), the management commands (start, stop, restart, logs) and troubleshooting.
 
-## 🔄 Automatic Startup Configuration
-
-### Method 1: Automated Setup (Recommended)
-Use the provided script to automatically configure startup:
-
-```bash
-chmod +x setup_startup.sh
-./setup_startup.sh
-```
-
-This script will:
-- Create a systemd service file
-- Enable the service for automatic startup
-- Start the service immediately
-- Show service status and management commands
-
-### Method 2: Manual Systemd Service
-
-1. **Create service file**:
-```bash
-sudo nano /etc/systemd/system/pitft-monitor.service
-```
-
-2. **Add service configuration** (adjust paths and username as needed):
-```ini
-[Unit]
-Description=Mini PiTFT Auto-Cycling System Monitor (RPi.GPIO)
-After=multi-user.target
-
-[Service]
-Type=simple
-User=smare
-WorkingDirectory=/home/smare/dev/projects/rpi_server_stats
-ExecStart=/usr/bin/python3 /home/smare/dev/projects/rpi_server_stats/run_rpi_stats_ST7789.py
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-```
-
-3. **Enable and start service**:
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable pitft-monitor.service
-sudo systemctl start pitft-monitor.service
-```
-
-### Method 3: RC.LOCAL (Alternative)
-
-1. **Edit rc.local**:
-```bash
-sudo nano /etc/rc.local
-```
-
-2. **Add before `exit 0`** (adjust paths as needed):
-```bash
-# Start Mini PiTFT Auto-Cycling System Monitor (RPi ≤4)
-cd /home/smare/dev/projects/rpi_server_stats
-python3 run_rpi_stats_ST7789.py &
-```
-
-### Method 4: Crontab (Alternative)
-
-1. **Edit crontab**:
-```bash
-crontab -e
-```
-
-2. **Add startup entry** (adjust path as needed):
-```bash
-@reboot cd /home/smare/dev/projects/rpi_server_stats && python3 run_rpi_stats_ST7789.py
-```
-
-## 🔧 Service Management
-
-### Systemd Commands
-```bash
-# Check service status
-sudo systemctl status pitft-monitor.service
-
-# Start service
-sudo systemctl start pitft-monitor.service
-
-# Stop service
-sudo systemctl stop pitft-monitor.service
-
-# Restart service
-sudo systemctl restart pitft-monitor.service
-
-# View logs
-sudo journalctl -u pitft-monitor.service -f
-
-# Disable startup
-sudo systemctl disable pitft-monitor.service
-
-# Re-enable startup
-sudo systemctl enable pitft-monitor.service
-```
-
-### Service Status Indicators
-- **Active (running)** - Service is running normally
-- **Failed** - Service encountered an error
-- **Inactive (dead)** - Service is stopped
-
-### Troubleshooting Startup Issues
-```bash
-# Check service logs
-sudo journalctl -u pitft-monitor.service --since "10 minutes ago"
-
-# Check system boot logs
-sudo journalctl -b
-
-# Verify file permissions
-ls -la /home/pi/pitft-monitor/run_rpi_stats_ST7789.py
-
-# Test manual run
-cd /home/pi/pitft-monitor
-python3 run_rpi_stats_ST7789.py
-```
+If the installer created the virtual environment (`~/pitft_venv`), point the service at `~/pitft_venv/bin/python` instead of `/usr/bin/python3`.
 
 ## 📦 Manual Installation
 
 ### Prerequisites Installation Script
 
-The project includes an auto-cycling optimized installation script:
+The project includes an installation script for Raspberry Pi Zero, Zero 2 W, 3 and 4:
 
 #### Universal RPi.GPIO Method
 ```bash
-chmod +x prerequisites-run_rpi_stats_ST7789.sh
-./prerequisites-run_rpi_stats_ST7789.sh
+bash ./prerequisites-run_rpi_stats_ST7789.sh
 ```
 
-**Features of the auto-cycling installer:**
-- **Universal compatibility** - Works with all Raspberry Pi models
-- **Auto-cycling detection** - Verifies script has auto-cycling features
-- **RPi.GPIO optimization** - Uses proven GPIO library for stability
-- **Virtual environment setup** - Creates backup environment for package isolation
-- **Hardware interface configuration** - Enables SPI/I2C with proper config.txt paths
-- **UbuntuNerdFont installation** - Downloads and installs optimal display fonts
-- **Comprehensive verification** - Tests all imports and auto-cycling features
-- **Model-specific guidance** - Suggests gpiod version for Raspberry Pi 5
+**What the installer does:**
+- **Runs under bash** - If you start it with `sh`, it re-launches itself under bash
+- **Detects your OS** - Prints the Raspberry Pi OS release it found
+- **Installs only what is missing** - `python3-spidev`, `python3-psutil`, `python3-pil` and the support packages through apt
+- **Leaves `RPi.GPIO` alone if it already works** - Raspberry Pi OS ships `python3-rpi-lgpio`, which provides `RPi.GPIO` and conflicts with `python3-rpi.gpio`. The installer only installs a provider if `import RPi.GPIO` fails (`python3-rpi-lgpio` when available, otherwise `python3-rpi.gpio`), so it never swaps one for the other
+- **Hardware interface configuration** - Enables SPI/I2C in the right config.txt (`/boot/firmware/config.txt` or `/boot/config.txt`) and asks for a reboot if it changed anything or `/dev/spidev0.0` is missing
+- **UbuntuNerdFont installation** - Downloads and installs the display font if it is not present
+- **Virtual environment only as a fallback** - `~/pitft_venv` is created only if the system packages cannot be imported
+- **Verification** - Tests the library imports and font loading
 
 ### Manual System Package Installation
 
 **For all Raspberry Pi models:**
 ```bash
 sudo apt update
-sudo apt install -y python3-pip python3-dev python3-spidev python3-rpi.gpio python3-psutil python3-pil
-sudo apt install -y fonts-dejavu-core fonts-ubuntu-font-family
+sudo apt install -y python3-pip python3-setuptools git python3-venv python3-smbus python3-pil python3-numpy python3-spidev python3-psutil
 ```
+
+**RPi.GPIO:** Raspberry Pi OS normally provides it already (through `python3-rpi-lgpio`). Check first, and only install a provider if the import fails:
+```bash
+python3 -c "import RPi.GPIO as GPIO; print('RPi.GPIO version:', GPIO.VERSION)"
+sudo apt install -y python3-rpi-lgpio    # only if the line above fails (use python3-rpi.gpio on releases without it)
+```
+Do not install `python3-rpi.gpio` on top of `python3-rpi-lgpio`: they conflict, and apt would remove the one that is installed.
+
+**Fonts:** see Ubuntu Nerd Font below.
 
 ### Python Dependencies
 
-**System packages (recommended):**
-```bash
-pip3 install --user psutil Pillow spidev RPi.GPIO
-```
+**System packages (recommended):** the apt packages above provide everything the script imports (`spidev`, `RPi.GPIO`, `psutil`, `PIL`).
 
-**Virtual environment (fallback):**
+**Virtual environment (fallback):** recent Raspberry Pi OS releases block `pip install` into the system Python, so use pip only inside a virtual environment. The installer creates one automatically when the system packages are not usable.
 ```bash
+sudo apt install -y build-essential python3-dev python3-venv
 python3 -m venv ~/pitft_venv
 source ~/pitft_venv/bin/activate
 pip install psutil Pillow spidev RPi.GPIO
 ```
-
 ### Ubuntu Nerd Font (Recommended)
 For optimal auto-cycling status display, the installer automatically downloads and installs Ubuntu Nerd Font. For manual installation:
 
@@ -359,7 +235,7 @@ else:
 The installation script automatically enables SPI in the correct config.txt location:
 ```bash
 # Automatic detection of config.txt location:
-# /boot/firmware/config.txt (Bookworm default)
+# /boot/firmware/config.txt (Bookworm and newer)
 # /boot/config.txt (Legacy systems)
 ```
 
@@ -371,7 +247,7 @@ sudo raspi-config
 
 # Or add directly to config.txt
 echo "dtparam=spi=on" | sudo tee -a /boot/config.txt
-# For Bookworm:
+# For Bookworm and newer:
 echo "dtparam=spi=on" | sudo tee -a /boot/firmware/config.txt
 
 sudo reboot
@@ -447,7 +323,7 @@ ls -la prerequisites-run_rpi_stats_ST7789.sh
 
 # Manual execution of script components
 sudo apt update
-sudo apt install -y python3-rpi.gpio python3-spidev
+sudo apt install -y python3-spidev python3-psutil python3-pil
 ```
 
 #### Virtual Environment Issues
@@ -482,7 +358,7 @@ ls -la /dev/spidev0.0 /dev/gpiomem
 ```
 
 #### Using Virtual Environment
-If system packages don't work or for Bookworm compatibility:
+If the installer reported that the system packages are not usable:
 
 ```bash
 # Activate virtual environment
@@ -518,12 +394,14 @@ deactivate
 ### Startup Sequence
 1. Display initialization with RPi.GPIO setup
 2. Memory clearing to prevent artifacts
-3. 4-second startup message with auto-cycle info
-4. Page 0 (System Info) displayed
-5. Auto-cycling begins with 2-minute intervals
+3. Background button polling starts
+4. 4-second startup message with auto-cycle info
+5. Page 0 (System Info) displayed (button presses made during the startup screen are ignored)
+6. Auto-cycling begins with 2-minute intervals
 
 ### Console Output
 ```
+Ubuntu Nerd Font loaded (MonoNerdFont)
 Mini PiTFT System Monitor - 180° Rotation with Auto-Cycling
 ===========================================================
 Initializing display with proper memory mapping...
@@ -549,8 +427,11 @@ Pages:
 
 Press Ctrl+C to exit
 Auto-cycled to page 1
+Updating display for page 1...
 Bottom button pressed! Switched to page 0 (manual override)
+Updating display for page 0...
 Top button pressed! Switched to page 1 (manual override)
+Updating display for page 1...
 ```
 
 ## 🔧 Technical Details
@@ -568,17 +449,19 @@ Top button pressed! Switched to page 1 (manual override)
 - **Memory Clearing**: Prevents initialization artifacts
 
 ### GPIO Implementation (RPi.GPIO)
-- **Library**: RPi.GPIO (universal compatibility)
+- **Library**: RPi.GPIO (universal compatibility; provided by `python3-rpi-lgpio` or `python3-rpi.gpio`)
 - **Mode**: BCM (Broadcom chip-specific pin numbering)
 - **Button Logic**: Active low with internal pull-up
-- **Debouncing**: Edge detection with state tracking
+- **Button Polling**: A background thread reads both buttons every 5 ms (`BUTTON_POLL_INTERVAL`)
+- **Debouncing**: A new button level must hold for 4 consecutive samples, about 20 ms (`BUTTON_DEBOUNCE_SAMPLES`), which filters contact bounce on press and release
+- **Press Queue**: Each accepted press is queued, so no press is lost while the display redraws; queued presses are applied together on the next loop pass
 - **Pin Setup**: All pins configured with proper direction and pull-up/down
 
 ### Performance Optimization
 - **Adaptive Refresh**: 3s system/network, 1.5s processes
 - **CPU Impact**: Minimal (~1-2% CPU usage)
 - **Memory Usage**: ~20-25MB RAM
-- **Button Response**: <100ms response time
+- **Button Detection**: Presses are detected within about 5-20 ms and queued; the page redraw that follows takes roughly 0.3 s on a Raspberry Pi 4B
 - **Auto-cycle Accuracy**: ±100ms timing precision
 
 ## 🛠️ Troubleshooting
@@ -652,8 +535,8 @@ grep -n "check_auto_cycle\|get_auto_cycle_status" run_rpi_stats_ST7789.py
 # Check Python packages
 python3 -c "import psutil, PIL, spidev, RPi.GPIO; print('All imports OK')"
 
-# Install missing dependencies
-pip3 install --user psutil Pillow spidev RPi.GPIO
+# Install missing dependencies (system packages)
+sudo apt install -y python3-psutil python3-pil python3-spidev
 
 # Use virtual environment if system packages fail
 source ~/pitft_venv/bin/activate
@@ -681,8 +564,8 @@ except:
 
 | Error | Solution |
 |-------|----------|
-| `No module named 'RPi.GPIO'` | Run `pip3 install --user RPi.GPIO` or `sudo apt install python3-rpi.gpio` |
-| `No module named 'spidev'` | Run `pip3 install --user spidev` or `sudo apt install python3-spidev` |
+| `No module named 'RPi.GPIO'` | Run `sudo apt install python3-rpi-lgpio` (or `python3-rpi.gpio` on releases without it); do not install both |
+| `No module named 'spidev'` | Run `sudo apt install python3-spidev` |
 | `SPI device not found` | Enable SPI: `sudo raspi-config` → Interface Options → SPI |
 | `Permission denied /dev/spidev0.0` | Add user to spi group: `sudo usermod -a -G spi $USER` |
 | `RuntimeError: No access to /dev/mem` | Add user to gpio group: `sudo usermod -a -G gpio $USER` |
@@ -692,8 +575,8 @@ except:
 
 ## 📊 System Requirements
 
-- **Raspberry Pi**: All models (Zero, Zero 2 W, 3, 4, 5)
-- **OS**: Raspberry Pi OS (Bullseye or Bookworm)
+- **Raspberry Pi**: Zero, Zero 2 W, 3 and 4 (use the Pi 5 version for Raspberry Pi 5)
+- **OS**: Raspberry Pi OS (Bullseye, Bookworm or Trixie)
 - **Python**: 3.7 or newer
 - **Memory**: Minimum 512MB RAM
 - **Storage**: ~100MB for dependencies and fonts
@@ -708,6 +591,7 @@ except:
 - 🆕 **Visual Status Indicators**: Purple auto-cycle status on all pages
 - 🆕 **Enhanced Startup Screen**: Auto-cycle information display
 - 🆕 **Adaptive Refresh Rates**: Optimized for different page types
+- 🆕 **Reliable Button Presses**: Background polling thread with debouncing and a press queue, so quick presses are not lost while the display redraws
 - 🆕 **GPIO Pin Update**: RST moved from GPIO 24 to 27 (button conflict resolution)
 
 ### v1.0 (Legacy)
@@ -725,6 +609,12 @@ except:
 ```python
 AUTO_CYCLE_INTERVAL = 120.0      # Auto-cycle every 2 minutes
 manual_override_duration = 10.0   # Manual override lasts 10 seconds
+```
+
+### Button Settings
+```python
+BUTTON_POLL_INTERVAL = 0.005     # Poll the buttons every 5 ms in a background thread
+BUTTON_DEBOUNCE_SAMPLES = 4      # A new level must hold for 4 samples (about 20 ms)
 ```
 
 ### Display Settings
@@ -753,6 +643,7 @@ PURPLE = (128, 0, 128)          # Auto-cycle status
 - **Auto-cycle Interval**: Modify `AUTO_CYCLE_INTERVAL` (seconds)
 - **Manual Override Duration**: Adjust `manual_override_duration` (seconds)
 - **Refresh Rates**: Change intervals in main loop (1.5s/3.0s)
+- **Button Sensitivity**: Adjust `BUTTON_POLL_INTERVAL` and `BUTTON_DEBOUNCE_SAMPLES`
 - **Temperature Unit**: Modify conversion in `get_system_data()`
 - **Process Count**: Adjust `[:5]` in `get_top_processes()`
 - **Colors**: Modify RGB color definitions for themes
@@ -764,10 +655,9 @@ Feel free to submit issues, feature requests, or improvements!
 
 ### Development Setup
 ```bash
-git clone <repository>
+git clone https://github.com/smare/rpi_server_stats.git
 cd rpi_server_stats
-chmod +x prerequisites-run_rpi_stats_ST7789.sh
-./prerequisites-run_rpi_stats_ST7789.sh
+bash ./prerequisites-run_rpi_stats_ST7789.sh
 ```
 
 ### Feature Requests

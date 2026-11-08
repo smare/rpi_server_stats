@@ -4,9 +4,14 @@ This guide walks through setting up either the RPi 5 (`run_rpi5_stats_ST7789.py`
 
 ## Prerequisites
 
-- Script tested and working manually
+- Script tested and working manually (stop that manual copy before starting the service, because only one copy can use the display)
 - Project directory: `/home/smare/dev/projects/rpi_server_stats`
 - Service files location: `/etc/systemd/system/`
+
+**Adjust to your system:**
+
+- The examples use the user `smare` and the project folder above. Replace them in the service files with your own user name and folder if they differ.
+- The services run the script with `/usr/bin/python3`. If the installer told you it created a virtual environment (`~/pitft_venv`), use `/home/smare/pitft_venv/bin/python` in `ExecStart` instead.
 
 ## Choose Your Version
 
@@ -152,6 +157,8 @@ Replace `SERVICE_NAME` with either `pitft-rpi5-monitor` or `pitft-rpi-monitor`:
 
 ### Service Won't Start
 
+The examples below use the RPi 5 names. For RPi ≤4, substitute `pitft-rpi-monitor.service` and `run_rpi_stats_ST7789.py`.
+
 1. **Check logs:**
    ```bash
    sudo journalctl -u pitft-rpi5-monitor.service -n 50
@@ -163,10 +170,9 @@ Replace `SERVICE_NAME` with either `pitft-rpi5-monitor` or `pitft-rpi-monitor`:
    python3 run_rpi5_stats_ST7789.py
    ```
 
-3. **Check file permissions:**
+3. **Check that the script exists and is readable** (it does not need to be executable, because the service starts it with `python3`):
    ```bash
    ls -la /home/smare/dev/projects/rpi_server_stats/run_rpi5_stats_ST7789.py
-   chmod +x /home/smare/dev/projects/rpi_server_stats/run_rpi5_stats_ST7789.py
    ```
 
 4. **Verify Python path:**
@@ -174,12 +180,14 @@ Replace `SERVICE_NAME` with either `pitft-rpi5-monitor` or `pitft-rpi-monitor`:
    which python3
    ```
 
-### GPIO Permission Issues (RPi 5)
+5. **Crash loop:** with `Restart=always` and `RestartSec=10`, a script that fails at startup is restarted every 10 seconds. Look for the repeating error in the logs, and stop the service while you fix it (`sudo systemctl stop pitft-rpi5-monitor.service`).
 
-If gpiod can't access GPIO:
+### GPIO and SPI Permission Issues
+
+If the script cannot access GPIO or SPI (gpiod on RPi 5, RPi.GPIO on RPi ≤4):
 
 ```bash
-sudo usermod -a -G gpio smare
+sudo usermod -a -G gpio,spi,i2c smare
 # Then logout and login, or reboot
 ```
 
@@ -202,7 +210,7 @@ After setup, reboot to confirm the service starts automatically:
 sudo reboot
 ```
 
-After reboot, check service status:
+After reboot, check service status (use `pitft-rpi-monitor.service` on RPi ≤4):
 
 ```bash
 sudo systemctl status pitft-rpi5-monitor.service

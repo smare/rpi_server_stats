@@ -2,7 +2,16 @@
 # prerequisites-run_rpi5_stats_ST7789.sh
 # Installation script for Mini PiTFT System Monitor prerequisites - Raspberry Pi 5 Compatible
 
+# This script uses bash features. Re-run it under bash if it was started with sh or dash.
+if [ -z "$BASH_VERSION" ]; then
+    exec bash "$0" "$@"
+fi
+
 set -e  # Exit on any error
+
+# Work from the folder that contains this script (the repo folder)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 
 echo "========================================"
 echo "Mini PiTFT System Monitor Setup"
@@ -64,13 +73,20 @@ print_status "Updating system packages..."
 sudo apt update && sudo apt upgrade -y
 print_success "System packages updated"
 
+# Report which OS this is (package names differ between Raspberry Pi OS releases)
+OS_NAME="unknown"
+if [ -r /etc/os-release ]; then
+    OS_NAME="$(. /etc/os-release && echo "${PRETTY_NAME:-unknown}")"
+fi
+print_status "Detected OS: $OS_NAME"
+
 # Install essential packages
 print_status "Installing essential packages..."
-sudo apt install -y python3-pip python3-dev python3-setuptools git python3-full python3-venv
+sudo apt install -y python3-pip python3-setuptools git python3-venv
 
-# Install build dependencies
-print_status "Installing build dependencies..."
-sudo apt install -y build-essential python3-dev python3-smbus python3-pil python3-numpy
+# Install support packages
+print_status "Installing support packages..."
+sudo apt install -y python3-smbus python3-pil python3-numpy
 
 # Install Raspberry Pi 5 specific GPIO libraries
 print_status "Installing Raspberry Pi 5 GPIO libraries..."
@@ -90,8 +106,7 @@ fi
 # Install GPIO packages
 GPIOD_VIA_PIP=false
 if [ -n "$LIBGPIOD_PKG" ]; then
-    sudo apt install -y libgpiod-dev "$LIBGPIOD_PKG" gpiod python3-libgpiod
-    if [ $? -eq 0 ]; then
+    if sudo apt install -y libgpiod-dev "$LIBGPIOD_PKG" gpiod python3-libgpiod; then
         print_success "Core GPIO libraries installed ($LIBGPIOD_PKG)"
     else
         print_warning "Some GPIO packages failed, trying minimal install..."
@@ -109,7 +124,7 @@ if [ "$GPIOD_VIA_PIP" = true ]; then
 fi
 
 # Install system packages for Python libraries (Debian way)
-print_status "Installing Python libraries via apt (recommended for Bookworm)..."
+print_status "Installing Python libraries via apt..."
 sudo apt install -y python3-spidev python3-psutil python3-pil
 
 # Install font utilities
@@ -191,43 +206,40 @@ else
     REBOOT_NEEDED=true
 fi
 
-# Create virtual environment as fallback option
+# Decide whether the system Python packages are usable. A virtual environment is only
+# created if gpiod could not be installed via apt, or the system imports do not work.
 VENV_DIR="$HOME/pitft_venv"
-print_status "Creating virtual environment as backup option..."
-if [ ! -d "$VENV_DIR" ]; then
-    python3 -m venv "$VENV_DIR"
-    print_success "Virtual environment created at $VENV_DIR"
+USE_VENV=false
+if [ "$GPIOD_VIA_PIP" = true ]; then
+    USE_VENV=true
+elif ! python3 -c "import spidev, gpiod, psutil; from PIL import Image, ImageDraw, ImageFont" >/dev/null 2>&1; then
+    print_warning "System Python packages are not usable, a virtual environment will be used instead"
+    USE_VENV=true
+fi
 
-    # Install packages in virtual environment as backup
+if [ "$USE_VENV" = true ]; then
+    print_status "Creating virtual environment..."
+    # Build tools and headers are needed to build gpiod from source with pip
+    sudo apt install -y build-essential python3-dev
+    if [ ! -d "$VENV_DIR" ]; then
+        python3 -m venv "$VENV_DIR"
+        print_success "Virtual environment created at $VENV_DIR"
+    else
+        print_success "Virtual environment already exists"
+    fi
+
     print_status "Installing Python packages in virtual environment..."
     "$VENV_DIR/bin/pip" install --upgrade pip
-    "$VENV_DIR/bin/pip" install spidev psutil pillow
-
-    # Install gpiod via pip if not available via apt
-    if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
-        print_status "Installing gpiod via pip in virtual environment..."
-        "$VENV_DIR/bin/pip" install gpiod
-        print_success "gpiod installed via pip"
-    fi
-
+    "$VENV_DIR/bin/pip" install spidev psutil pillow gpiod
     print_success "Packages installed in virtual environment"
-else
-    print_success "Virtual environment already exists"
-
-    # If gpiod needs to be installed via pip and venv exists, install it
-    if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
-        print_status "Installing gpiod via pip in existing virtual environment..."
-        "$VENV_DIR/bin/pip" install gpiod
-        print_success "gpiod installed via pip"
-    fi
 fi
 
 # Verify installation
 print_status "Verifying installation..."
 
 # Test Python imports
-if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
-    print_status "Testing imports with virtual environment (gpiod via pip)..."
+if [ "$USE_VENV" = true ]; then
+    print_status "Testing imports with the virtual environment..."
     "$VENV_DIR/bin/python" -c "
 try:
     import spidev
@@ -248,13 +260,13 @@ try:
     print('✓ All required libraries imported successfully (system packages)')
 except ImportError as e:
     print(f'! System packages import issue: {e}')
-    print('! Will use virtual environment instead')
+    print('! Please check the packages listed above')
 "
 fi
 
 # Test gpiod specifically for Raspberry Pi 5
 print_status "Testing Raspberry Pi 5 GPIO compatibility..."
-if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
+if [ "$USE_VENV" = true ]; then
     "$VENV_DIR/bin/python" -c "
 try:
     import gpiod
@@ -305,13 +317,9 @@ if not font_found:
     print('! UbuntuNerdFont not found, script will use default fonts')
 "
 
-# Check if run_rpi5_stats_ST7789.py exists
+# Check that the monitor script is next to this installer
 if [ -f "run_rpi5_stats_ST7789.py" ]; then
     print_success "Found run_rpi5_stats_ST7789.py script"
-
-    # Make the script executable
-    chmod +x run_rpi5_stats_ST7789.py
-    print_success "Made script executable"
 else
     print_warning "run_rpi5_stats_ST7789.py not found in current directory"
     print_status "Make sure to download the Raspberry Pi 5 version of the main script"
@@ -325,27 +333,16 @@ echo "========================================"
 print_status "IMPORTANT: Raspberry Pi 5 specific notes:"
 print_status "- Uses gpiod library for GPIO access (newer than RPi.GPIO)"
 print_status "- GPIO chip: gpiochip4 (different from older Pi models)"
-if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
-    print_status "- gpiod installed via pip in virtual environment"
-    print_warning "IMPORTANT: Use virtual environment to run the script:"
+if [ "$USE_VENV" = true ]; then
+    print_status "- The system Python packages were not usable, so a virtual environment was created"
+    print_warning "IMPORTANT: Use the virtual environment to run the script:"
     echo
-    print_success "To activate virtual environment:"
-    echo "source $VENV_DIR/bin/activate"
-    echo
-    print_success "To run your script with virtual environment:"
-    echo "$VENV_DIR/bin/python run_rpi5_stats_ST7789.py"
-else
-    print_status "- If system packages don't work, use the virtual environment:"
-    echo
-    print_success "To activate virtual environment:"
-    echo "source $VENV_DIR/bin/activate"
-    echo
-    print_success "To run your script with virtual environment:"
+    print_success "To run your script with the virtual environment:"
     echo "$VENV_DIR/bin/python run_rpi5_stats_ST7789.py"
 fi
 
 # Check for reboot requirement
-if [ "${REBOOT_NEEDED:-false}" = true ]; then
+if [ "${REBOOT_NEEDED:-false}" = true ] || [ ! -e /dev/spidev0.0 ]; then
     echo
     print_warning "REBOOT REQUIRED!"
     print_status "Hardware interfaces (SPI/I2C) have been enabled."
@@ -361,15 +358,13 @@ if [ "${REBOOT_NEEDED:-false}" = true ]; then
     fi
 else
     echo
-    if [ "${GPIOD_VIA_PIP:-false}" = true ]; then
-        print_status "You can now run the Raspberry Pi 5 script using virtual environment:"
+    if [ "$USE_VENV" = true ]; then
+        print_status "You can now run the Raspberry Pi 5 script using the virtual environment:"
         print_success "$VENV_DIR/bin/python run_rpi5_stats_ST7789.py"
-        print_warning "Note: Virtual environment required due to gpiod installation method"
+        print_warning "Note: the virtual environment is required because the system packages were not usable"
     else
         print_status "You can now run the Raspberry Pi 5 script:"
         print_success "python3 run_rpi5_stats_ST7789.py"
-        print_status "Or with virtual environment:"
-        print_success "$VENV_DIR/bin/python run_rpi5_stats_ST7789.py"
     fi
 fi
 
